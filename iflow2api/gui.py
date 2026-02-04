@@ -331,6 +331,8 @@ class IFlow2ApiApp:
 
     def _build_pool_config(self) -> ft.Control:
         """多账号账号池（推荐）。"""
+        keys_path = Path.home() / ".iflow2api" / "keys.json"
+
         # 本地 API Key（给 OpenCode/客户端用）
         self.client_key_field = ft.TextField(
             label="本地 API Key（给 OpenCode 用）",
@@ -522,12 +524,22 @@ class IFlow2ApiApp:
 
         self._refresh_accounts_table()
 
+        pool_hint_controls: list[ft.Control] = []
+        if not self.routing.accounts:
+            pool_hint_controls.append(
+                ft.Text("账号池为空：请先点击「添加账号（OAuth 登录）」", color=ft.Colors.ORANGE)
+            )
+        pool_hint_controls.append(
+            ft.Text(f"账号池文件: {keys_path}", size=12, selectable=True)
+        )
+
         return ft.Container(
             content=ft.Column(
                 [
                     ft.Text("账号池模式（推荐）", weight=ft.FontWeight.BOLD),
                     ft.Row([self.client_key_field, regen_btn]),
                     ft.Row([self.strategy_dropdown, add_account_btn, import_as_account_btn], wrap=True),
+                    *pool_hint_controls,
                     ft.Text(
                         f"本地 Base URL: http://127.0.0.1:{self.settings.port}/v1",
                         size=12,

@@ -63,11 +63,12 @@ class OAuthLoginHandler:
                 # 3. 打开浏览器访问 OAuth 授权页面
                 oauth = IFlowOAuth()
                 auth_url = oauth.get_auth_url(redirect_uri=server.get_callback_url())
+                self.add_log(f"授权链接: {auth_url}")
                 webbrowser.open(auth_url)
                 self.add_log("已打开浏览器，请完成授权...")
 
                 # 4. 等待回调
-                code, error = server.wait_for_callback(timeout=60)
+                code, error = server.wait_for_callback(timeout=300)
                 server.stop()
 
                 if error:
