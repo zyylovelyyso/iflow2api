@@ -19,6 +19,24 @@ from .routing import (
     load_routing_config,
 )
 
+def _normalize_model_id(model: Any) -> Any:
+    """
+    Best-effort normalization for commonly seen model ID aliases.
+
+    - Keep this conservative: only normalize well-known aliases/case variants.
+    """
+    if not isinstance(model, str):
+        return model
+    raw = model.strip()
+    low = raw.lower()
+    # iFlow ROME 30B sometimes appears in mixed-case UI/docs.
+    if low == "iflow-rome-30ba3b":
+        return "iflow-rome-30ba3b"
+    # Some clients use a "-chat" suffix while the upstream uses the base id.
+    if low == "deepseek-v3.2-chat":
+        return "deepseek-v3.2"
+    return raw
+
 
 def _extract_bearer_token(request: Request) -> Optional[str]:
     auth = request.headers.get("Authorization", "")
@@ -286,6 +304,12 @@ class ProxyManager:
         Streaming:
         - Only retries before the first byte is yielded (mid-stream failover is not supported).
         """
+        # Normalize model id for better compatibility with different clients/docs.
+        try:
+            body["model"] = _normalize_model_id(body.get("model"))
+        except Exception:
+            pass
+
         await self._maybe_reload_routing()
         token = _extract_bearer_token(request)
         route: Optional[ApiKeyRoute] = None

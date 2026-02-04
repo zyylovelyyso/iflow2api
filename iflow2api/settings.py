@@ -36,8 +36,10 @@ class AppSettings(BaseModel):
     # OpenCode 集成（保存到 ~/.iflow2api/config.json）
     opencode_config_path: str = ""  # 自动探测失败时可手动指定
     opencode_provider_name: str = "iflow"
-    opencode_set_default_model: bool = False
-    opencode_default_model: str = "qwen3-coder-plus"
+    opencode_set_default_model: bool = True
+    opencode_default_model: str = "glm-4.7"
+    opencode_set_small_model: bool = True
+    opencode_small_model: str = "minimax-m2.1"
     client_api_key: str = ""  # 来访方（OpenCode）调用本地 iflow2api 的 token（非上游 iFlow key）
     client_strategy: str = "least_busy"  # least_busy / round_robin
 
@@ -96,6 +98,10 @@ def load_settings() -> AppSettings:
                     settings.opencode_set_default_model = data["opencode_set_default_model"]
                 if "opencode_default_model" in data:
                     settings.opencode_default_model = data["opencode_default_model"]
+                if "opencode_set_small_model" in data:
+                    settings.opencode_set_small_model = data["opencode_set_small_model"]
+                if "opencode_small_model" in data:
+                    settings.opencode_small_model = data["opencode_small_model"]
                 if "client_api_key" in data:
                     settings.client_api_key = data["client_api_key"]
                 if "client_strategy" in data:
@@ -128,6 +134,8 @@ def save_settings(settings: AppSettings) -> None:
         "opencode_provider_name": settings.opencode_provider_name,
         "opencode_set_default_model": settings.opencode_set_default_model,
         "opencode_default_model": settings.opencode_default_model,
+        "opencode_set_small_model": settings.opencode_set_small_model,
+        "opencode_small_model": settings.opencode_small_model,
         "client_api_key": settings.client_api_key,
         "client_strategy": settings.client_strategy,
     }

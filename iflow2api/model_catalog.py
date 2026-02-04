@@ -26,7 +26,7 @@ def get_known_models() -> list[ModelSpec]:
     return [
         ModelSpec(id="glm-4.7", name="GLM-4.7", description="Zhipu GLM-4.7"),
         ModelSpec(id="glm-4.6", name="GLM-4.6", description="Zhipu GLM-4.6"),
-        ModelSpec(id="iFlow-ROME-30BA3B", name="iFlow-ROME-30BA3B", description="iFlow ROME 30B (fast)"),
+        ModelSpec(id="iflow-rome-30ba3b", name="iFlow-ROME-30BA3B", description="iFlow ROME 30B (fast)"),
         ModelSpec(id="deepseek-r1", name="DeepSeek-R1", description="DeepSeek reasoning model"),
         ModelSpec(id="deepseek-v3", name="DeepSeek-V3-671B", description="DeepSeek V3 671B"),
         ModelSpec(id="deepseek-v3.1", name="DeepSeek-V3.1", description="DeepSeek V3.1"),
@@ -78,4 +78,3 @@ def to_opencode_models(models: Iterable[ModelSpec]) -> dict[str, Any]:
             "capabilities": {"toolCalls": True},
         }
     return out
-

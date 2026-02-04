@@ -466,12 +466,16 @@ class IFlow2ApiApp:
         )
         self.opencode_set_small_checkbox = ft.Checkbox(
             label="设为 small_model",
-            value=True,
+            value=self.settings.opencode_set_small_model,
         )
         self.opencode_small_model_dropdown = ft.Dropdown(
             label="small_model",
             options=[ft.dropdown.Option(mid) for mid in model_ids],
-            value="iFlow-ROME-30BA3B" if "iFlow-ROME-30BA3B" in model_ids else (model_ids[0] if model_ids else ""),
+            value=(
+                self.settings.opencode_small_model
+                if self.settings.opencode_small_model in model_ids
+                else (model_ids[0] if model_ids else "")
+            ),
             width=220,
         )
 
@@ -832,6 +836,8 @@ class IFlow2ApiApp:
         self.settings.opencode_config_path = config_path_str
         self.settings.opencode_set_default_model = bool(self.opencode_set_default_checkbox.value) if self.opencode_set_default_checkbox else False
         self.settings.opencode_default_model = (self.opencode_default_model_dropdown.value or self.settings.opencode_default_model).strip() if self.opencode_default_model_dropdown else self.settings.opencode_default_model
+        self.settings.opencode_set_small_model = bool(self.opencode_set_small_checkbox.value) if self.opencode_set_small_checkbox else False
+        self.settings.opencode_small_model = (self.opencode_small_model_dropdown.value or self.settings.opencode_small_model).strip() if self.opencode_small_model_dropdown else self.settings.opencode_small_model
         save_settings(self.settings)
 
         port = self.settings.port
@@ -845,8 +851,8 @@ class IFlow2ApiApp:
                 api_key=self.settings.client_api_key,
                 set_default_model=self.settings.opencode_set_default_model,
                 default_model=self.settings.opencode_default_model,
-                set_small_model=bool(self.opencode_set_small_checkbox.value) if self.opencode_set_small_checkbox else False,
-                small_model=(self.opencode_small_model_dropdown.value or "iFlow-ROME-30BA3B") if self.opencode_small_model_dropdown else "iFlow-ROME-30BA3B",
+                set_small_model=self.settings.opencode_set_small_model,
+                small_model=self.settings.opencode_small_model,
             )
             self.page.open(
                 ft.SnackBar(content=ft.Text("已写入 OpenCode 配置"), bgcolor=ft.Colors.GREEN)

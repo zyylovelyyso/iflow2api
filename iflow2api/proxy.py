@@ -65,10 +65,19 @@ class IFlowProxy:
                 max_connections = 100
                 max_keepalive = 20
 
+            # http2 requires optional dependency `h2`; fall back gracefully.
+            http2_enabled = False
+            try:
+                import h2  # noqa: F401
+
+                http2_enabled = True
+            except Exception:
+                http2_enabled = False
+
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(300.0, connect=10.0),
                 follow_redirects=True,
-                http2=True,
+                http2=http2_enabled,
                 limits=httpx.Limits(
                     max_connections=max_connections,
                     max_keepalive_connections=max_keepalive,
@@ -86,10 +95,23 @@ class IFlowProxy:
         """
         获取可用模型列表
 
-        iFlow API 没有公开的 /models 端点，因此返回已知的模型列表。
-        模型列表为常见模型的“已知集合”（可用性取决于账号权限与 iFlow 侧更新）。
-        使用 iFlow-Cli User-Agent 可以解锁这些高级模型。
+        优先调用上游 iFlow 的 `/models` 获取“真实可用”列表；失败时回退到内置的已知集合。
+        （可用性仍取决于账号权限与 iFlow 侧更新。）
         """
+        client = await self._get_client()
+        try:
+            async with self._limit():
+                resp = await client.get(
+                    f"{self.base_url}/models",
+                    headers=self._get_headers(),
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            if isinstance(data, dict) and isinstance(data.get("data"), list):
+                return data
+        except Exception:
+            pass
+
         import time
 
         from .model_catalog import get_known_models, to_openai_models_list

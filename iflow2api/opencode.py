@@ -64,9 +64,9 @@ def ensure_iflow_provider(
     base_url: str,
     api_key: str,
     set_default_model: bool = False,
-    default_model: str = "qwen3-coder-plus",
+    default_model: str = "glm-4.7",
     set_small_model: bool = False,
-    small_model: str = "iFlow-ROME-30BA3B",
+    small_model: str = "minimax-m2.1",
     create_backup: bool = True,
 ) -> UpdateResult:
     cfg = _safe_read_json(config_path)
@@ -101,4 +101,3 @@ def ensure_iflow_provider(
 
     _safe_write_json(config_path, cfg)
     return UpdateResult(path=config_path, backup_path=backup_path)
-

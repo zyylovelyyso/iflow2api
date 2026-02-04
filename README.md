@@ -17,15 +17,14 @@
 
 | 模型 ID | 名称 | 说明 |
 |---------|------|------|
-| `glm-4.7` | GLM-4.7 | 智谱 GLM-4.7 (推荐) |
-| `iFlow-ROME-30BA3B` | iFlow-ROME-30BA3B | iFlow ROME 30B (快速) |
-| `deepseek-v3.2-chat` | DeepSeek-V3.2 | DeepSeek V3.2 对话模型 |
-| `qwen3-coder-plus` | Qwen3-Coder-Plus | 通义千问 Qwen3 Coder Plus |
-| `kimi-k2-thinking` | Kimi-K2-Thinking | Moonshot Kimi K2 思考模型 |
+| `glm-4.7` | GLM-4.7 | 智谱 GLM-4.7 |
 | `minimax-m2.1` | MiniMax-M2.1 | MiniMax M2.1 |
+| `iflow-rome-30ba3b` | iFlow-ROME-30BA3B | iFlow ROME 30B |
+| `deepseek-v3.2` | DeepSeek-V3.2 | DeepSeek V3.2 |
+| `qwen3-coder-plus` | Qwen3-Coder-Plus | 通义千问 Qwen3 Coder Plus |
 | `kimi-k2-0905` | Kimi-K2-0905 | Moonshot Kimi K2 0905 |
 
-> 模型列表来源于 iflow-cli 源码，可能随 iFlow 更新而变化。
+> 实际可用模型以 `GET /v1/models` 返回为准（优先直连上游 `/models`；失败时回退到内置“已知集合”）。
 
 ## 前置条件
 
