@@ -578,6 +578,12 @@ class IFlow2ApiApp:
                 self.routing = KeyRoutingConfig()
             self._refresh_accounts_table()
             self._refresh_resilience_fields()
+            # If the server was waiting for accounts, start it now.
+            if self.settings.auto_run_server and self.server.state != ServerState.RUNNING:
+                try:
+                    self._start_server(None)
+                except Exception:
+                    pass
             self.page.update()
         elif isinstance(message, dict) and message.get("type") == "single_login_success":
             if self.api_key_field:
