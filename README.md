@@ -2,6 +2,8 @@
 
 将 iFlow CLI 的 AI 服务暴露为 OpenAI 兼容 API。
 
+> 说明：本仓库为 `cacaview/iflow2api` 的 fork，用于个人桌面使用场景的增强（多账号账号池 + 负载均衡/并发上限/熔断-failover + OpenCode 一键接入 + Windows 桌面快捷方式）。
+
 ## 功能
 
 - 自动读取 iFlow 配置文件 (`~/.iflow/settings.json`)
@@ -107,7 +109,7 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="http://localhost:8000/v1",
-    api_key="not-needed"  # API Key 从 iFlow 配置自动读取
+    api_key="not-needed"  # 默认从 ~/.iflow/settings.json 自动读取上游 iFlow apiKey
 )
 
 # 非流式请求
@@ -160,6 +162,72 @@ curl http://localhost:8000/v1/chat/completions \
 - **LobeChat**: 添加 OpenAI 兼容提供商，Base URL 设为 `http://localhost:8000/v1`
 - **Open WebUI**: 添加 OpenAI 兼容连接
 - **其他 OpenAI SDK 兼容应用**
+
+## 多账号 / 多并发（可选）
+
+默认模式下，服务会读取本机的 `~/.iflow/settings.json`，所有请求共用同一个 iFlow 账号。
+
+如果你希望：
+- 用“本服务自己的 API Key”隔离不同调用方（OpenCode/多个设备/多个用户）
+- 将不同调用方路由到不同的 iFlow 账号
+- 对每个 iFlow 账号做并发上限（避免单账号被打爆/风控）
+
+可以创建配置文件：
+- Windows: `C:\\Users\\<用户名>\\.iflow2api\\keys.json`
+- Linux/Mac: `~/.iflow2api/keys.json`
+
+示例 `keys.json`：
+
+```json
+{
+  "auth": { "enabled": true, "required": true },
+  "accounts": {
+    "acc1": { "api_key": "iflow_apiKey_1", "base_url": "https://apis.iflow.cn/v1", "max_concurrency": 2 },
+    "acc2": { "api_key": "iflow_apiKey_2", "base_url": "https://apis.iflow.cn/v1", "max_concurrency": 2 }
+  },
+  "keys": {
+    "sk-local-user-a": { "account": "acc1" },
+    "sk-local-user-b": { "account": "acc2" },
+    "sk-local-pool": { "accounts": ["acc1", "acc2"], "strategy": "least_busy" }
+  },
+  "default": { "account": "acc1" }
+}
+```
+
+说明：
+- `auth.enabled=true` 才会校验来访请求的 `Authorization: Bearer <token>`。
+- `auth.required=true` 时，缺少/错误 token 会直接返回 401。
+- `keys.<token>` 用来把“来访 API Key”映射到上游 `accounts`。
+- `max_concurrency` 为单个上游账号的并发上限（0 表示不限制）。
+- `accounts` 池支持 `least_busy`（按 in-flight 选择）或 `round_robin`。
+- `resilience`（可选）控制失败熔断与 failover（例如连续失败 N 次后临时禁用该账号一段时间，并在可重试错误上自动切换到另一个账号）。
+
+### 稳定性（熔断 / failover）
+
+你可以在 `keys.json` 顶层加入（不填会用默认值）：
+
+```json
+{
+  "resilience": {
+    "enabled": true,
+    "failure_threshold": 3,
+    "cool_down_seconds": 30,
+    "retry_attempts": 1,
+    "retry_backoff_ms": 200,
+    "retry_status_codes": [429, 500, 502, 503, 504]
+  }
+}
+```
+
+并提供一个本地调试端点（不返回任何上游密钥）：
+- `GET /debug/accounts`
+
+### OpenCode 接入建议
+
+如果 OpenCode 支持 OpenAI 兼容 `Chat Completions` + 自定义 Base URL：
+- Base URL: `http://127.0.0.1:8000/v1`
+- API Key: 填 `keys.json` 里配置的任意一个 token（例如 `sk-local-user-a`）
+- Model: 使用 iFlow 模型 ID（例如 `glm-4.7`）
 
 ## 架构
 

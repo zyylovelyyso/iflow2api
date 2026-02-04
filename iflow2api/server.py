@@ -10,6 +10,7 @@ from typing import Callable, Optional
 import uvicorn
 
 from .settings import AppSettings
+from .routing import load_routing_config
 
 
 class ServerState(Enum):
@@ -65,8 +66,15 @@ class ServerManager:
             return False
 
         if not settings.api_key:
-            self._set_state(ServerState.ERROR, "API Key 未配置")
-            return False
+            # 多账号模式：允许无单账号 key，仅依赖 ~/.iflow2api/keys.json
+            try:
+                routing = load_routing_config()
+                if not routing.accounts:
+                    self._set_state(ServerState.ERROR, "未配置账号池：请先添加 iFlow 账号或填入单账号 API Key")
+                    return False
+            except Exception as e:
+                self._set_state(ServerState.ERROR, f"账号池配置错误: {e}")
+                return False
 
         # 检查端口是否可用
         if not is_port_available(settings.host, settings.port):
@@ -100,26 +108,25 @@ class ServerManager:
     def _run_server(self):
         """在线程中运行服务"""
         try:
-            # 动态设置配置
-            from . import config as config_module
-            from .config import IFlowConfig
+            # 单账号模式：动态替换 load_iflow_config
+            if self._settings.api_key:
+                from . import config as config_module
+                from .config import IFlowConfig
 
-            # 创建自定义配置
-            custom_config = IFlowConfig(
-                api_key=self._settings.api_key,
-                base_url=self._settings.base_url,
-            )
+                custom_config = IFlowConfig(
+                    api_key=self._settings.api_key,
+                    base_url=self._settings.base_url,
+                )
 
-            # 替换 load_iflow_config 函数
-            def patched_load():
-                return custom_config
+                def patched_load():
+                    return custom_config
 
-            config_module.load_iflow_config = patched_load
+                config_module.load_iflow_config = patched_load
 
             # 重置全局代理实例
             from . import app as app_module
-            app_module._proxy = None
-            app_module._config = None
+            if hasattr(app_module, "_proxy_manager"):
+                app_module._proxy_manager = None
 
             # 直接导入 app 对象，避免打包后字符串导入失败
             from .app import app

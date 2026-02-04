@@ -3,7 +3,7 @@
 import webbrowser
 import threading
 import asyncio
-from typing import Optional
+from typing import Optional, Callable, Any
 
 from .oauth import IFlowOAuth
 from .web_server import OAuthCallbackServer, find_available_port
@@ -13,16 +13,23 @@ from .config import load_iflow_config, save_iflow_config, IFlowConfig
 class OAuthLoginHandler:
     """OAuth 登录处理器"""
 
-    def __init__(self, add_log_callback, success_callback=None):
+    def __init__(
+        self,
+        add_log_callback,
+        success_callback: Optional[Callable[..., Any]] = None,
+        save_callback: Optional[Callable[[IFlowConfig, dict, dict], None]] = None,
+    ):
         """
         初始化 OAuth 登录处理器
 
         Args:
             add_log_callback: 添加日志的回调函数
             success_callback: 登录成功后的回调函数
+            save_callback: 自定义保存回调（用于多账号场景）。签名: (config, user_info, token_data)
         """
         self.add_log = add_log_callback
         self.success_callback = success_callback
+        self.save_callback = save_callback
         self._is_logging_in = False  # 防止重复登录
 
     def start_login(self):
@@ -92,8 +99,7 @@ class OAuthLoginHandler:
                         if not api_key:
                             raise ValueError("未能获取 API Key")
 
-                        # 保存到 ~/.iflow/settings.json
-                        # 尝试加载现有配置
+                        # 构建配置对象
                         try:
                             existing_config = load_iflow_config()
                         except (FileNotFoundError, ValueError):
@@ -115,7 +121,11 @@ class OAuthLoginHandler:
                         if token_data.get("expires_at"):
                             existing_config.oauth_expires_at = token_data["expires_at"]
 
-                        save_iflow_config(existing_config)
+                        # 保存配置（默认写入 ~/.iflow/settings.json，多账号模式可自定义写入 keys.json）
+                        if self.save_callback:
+                            self.save_callback(existing_config, user_info, token_data)
+                        else:
+                            save_iflow_config(existing_config)
 
                         self.add_log(
                             f"登录成功！用户: {user_info.get('username', user_info.get('phone', 'Unknown'))}"
@@ -124,7 +134,11 @@ class OAuthLoginHandler:
 
                         # 通知 GUI 刷新 (在主线程中)
                         if self.success_callback:
-                            self.success_callback(existing_config)
+                            try:
+                                self.success_callback(existing_config, user_info)
+                            except TypeError:
+                                # Backwards compatible: old callback signature (config)
+                                self.success_callback(existing_config)
 
                         await oauth.close()
                     except Exception as ex:

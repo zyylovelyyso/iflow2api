@@ -1,7 +1,9 @@
 """API 代理服务 - 转发请求到 iFlow API"""
 
+import asyncio
 import httpx
 from typing import AsyncIterator, Optional
+from contextlib import asynccontextmanager
 from .config import IFlowConfig
 
 
@@ -12,10 +14,37 @@ IFLOW_CLI_USER_AGENT = "iFlow-Cli"
 class IFlowProxy:
     """iFlow API 代理"""
 
-    def __init__(self, config: IFlowConfig):
+    def __init__(self, config: IFlowConfig, max_concurrency: int = 0):
         self.config = config
         self.base_url = config.base_url.rstrip("/")
         self._client: Optional[httpx.AsyncClient] = None
+        self._max_concurrency = max_concurrency
+        self._semaphore: Optional[asyncio.Semaphore] = (
+            asyncio.Semaphore(max_concurrency) if max_concurrency and max_concurrency > 0 else None
+        )
+        self._in_flight: int = 0
+
+    @property
+    def in_flight(self) -> int:
+        return self._in_flight
+
+    @asynccontextmanager
+    async def _limit(self):
+        if self._semaphore is None:
+            self._in_flight += 1
+            try:
+                yield
+            finally:
+                self._in_flight -= 1
+            return
+
+        await self._semaphore.acquire()
+        self._in_flight += 1
+        try:
+            yield
+        finally:
+            self._in_flight -= 1
+            self._semaphore.release()
 
     def _get_headers(self) -> dict:
         """获取请求头"""
@@ -28,9 +57,22 @@ class IFlowProxy:
     async def _get_client(self) -> httpx.AsyncClient:
         """获取或创建 HTTP 客户端"""
         if self._client is None or self._client.is_closed:
+            # Tuning for speed: keep connections warm and allow enough concurrency.
+            if self._max_concurrency and self._max_concurrency > 0:
+                max_connections = max(20, int(self._max_concurrency) * 4)
+                max_keepalive = max(10, int(self._max_concurrency) * 2)
+            else:
+                max_connections = 100
+                max_keepalive = 20
+
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(300.0, connect=10.0),
                 follow_redirects=True,
+                http2=True,
+                limits=httpx.Limits(
+                    max_connections=max_connections,
+                    max_keepalive_connections=max_keepalive,
+                ),
             )
         return self._client
 
@@ -45,64 +87,15 @@ class IFlowProxy:
         获取可用模型列表
 
         iFlow API 没有公开的 /models 端点，因此返回已知的模型列表。
-        模型列表来源于 iflow-cli 源码中的 SUPPORTED_MODELS。
+        模型列表为常见模型的“已知集合”（可用性取决于账号权限与 iFlow 侧更新）。
         使用 iFlow-Cli User-Agent 可以解锁这些高级模型。
         """
-        # iFlow CLI 支持的模型列表 (来源: iflow-cli SUPPORTED_MODELS)
-        models = [
-            {"id": "glm-4.7", "name": "GLM-4.7", "description": "智谱 GLM-4.7 (推荐)"},
-            {
-                "id": "iFlow-ROME-30BA3B",
-                "name": "iFlow-ROME-30BA3B",
-                "description": "iFlow ROME 30B (快速)",
-            },
-            {
-                "id": "deepseek-v3.2-chat",
-                "name": "DeepSeek-V3.2",
-                "description": "DeepSeek V3.2 对话模型",
-            },
-            {
-                "id": "qwen3-coder-plus",
-                "name": "Qwen3-Coder-Plus",
-                "description": "通义千问 Qwen3 Coder Plus",
-            },
-            {
-                "id": "kimi-k2-thinking",
-                "name": "Kimi-K2-Thinking",
-                "description": "Moonshot Kimi K2 思考模型",
-            },
-            {
-                "id": "minimax-m2.1",
-                "name": "MiniMax-M2.1",
-                "description": "MiniMax M2.1",
-            },
-            {
-                "id": "kimi-k2-0905",
-                "name": "Kimi-K2-0905",
-                "description": "Moonshot Kimi K2 0905",
-            },
-        ]
-
         import time
 
-        current_time = int(time.time())
+        from .model_catalog import get_known_models, to_openai_models_list
 
-        # 返回 OpenAI 兼容格式
-        return {
-            "object": "list",
-            "data": [
-                {
-                    "id": model["id"],
-                    "object": "model",
-                    "created": current_time,
-                    "owned_by": "iflow",
-                    "permission": [],
-                    "root": model["id"],
-                    "parent": None,
-                }
-                for model in models
-            ],
-        }
+        current_time = int(time.time())
+        return to_openai_models_list(get_known_models(), owned_by="iflow", created=current_time)
 
     async def chat_completions(
         self,
@@ -125,13 +118,14 @@ class IFlowProxy:
         if stream:
             return self._stream_chat_completions(client, request_body)
         else:
-            response = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=self._get_headers(),
-                json=request_body,
-            )
-            response.raise_for_status()
-            result = response.json()
+            async with self._limit():
+                response = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=self._get_headers(),
+                    json=request_body,
+                )
+                response.raise_for_status()
+                result = response.json()
 
             # 确保 usage 统计信息存在 (OpenAI 兼容)
             if "usage" not in result:
@@ -149,15 +143,16 @@ class IFlowProxy:
         request_body: dict,
     ) -> AsyncIterator[bytes]:
         """流式调用 chat completions API"""
-        async with client.stream(
-            "POST",
-            f"{self.base_url}/chat/completions",
-            headers=self._get_headers(),
-            json=request_body,
-        ) as response:
-            response.raise_for_status()
-            async for chunk in response.aiter_bytes():
-                yield chunk
+        async with self._limit():
+            async with client.stream(
+                "POST",
+                f"{self.base_url}/chat/completions",
+                headers=self._get_headers(),
+                json=request_body,
+            ) as response:
+                response.raise_for_status()
+                async for chunk in response.aiter_bytes():
+                    yield chunk
 
     async def proxy_request(
         self,

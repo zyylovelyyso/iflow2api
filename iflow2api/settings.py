@@ -31,6 +31,15 @@ class AppSettings(BaseModel):
     auto_start: bool = False  # 开机自启动
     start_minimized: bool = False  # 启动时最小化
     auto_run_server: bool = False  # 启动时自动运行服务
+    close_to_background: bool = True  # 点击关闭按钮时后台运行（不退出）
+
+    # OpenCode 集成（保存到 ~/.iflow2api/config.json）
+    opencode_config_path: str = ""  # 自动探测失败时可手动指定
+    opencode_provider_name: str = "iflow"
+    opencode_set_default_model: bool = False
+    opencode_default_model: str = "qwen3-coder-plus"
+    client_api_key: str = ""  # 来访方（OpenCode）调用本地 iflow2api 的 token（非上游 iFlow key）
+    client_strategy: str = "least_busy"  # least_busy / round_robin
 
 
 def get_config_dir() -> Path:
@@ -77,6 +86,20 @@ def load_settings() -> AppSettings:
                     settings.start_minimized = data["start_minimized"]
                 if "auto_run_server" in data:
                     settings.auto_run_server = data["auto_run_server"]
+                if "close_to_background" in data:
+                    settings.close_to_background = data["close_to_background"]
+                if "opencode_config_path" in data:
+                    settings.opencode_config_path = data["opencode_config_path"]
+                if "opencode_provider_name" in data:
+                    settings.opencode_provider_name = data["opencode_provider_name"]
+                if "opencode_set_default_model" in data:
+                    settings.opencode_set_default_model = data["opencode_set_default_model"]
+                if "opencode_default_model" in data:
+                    settings.opencode_default_model = data["opencode_default_model"]
+                if "client_api_key" in data:
+                    settings.client_api_key = data["client_api_key"]
+                if "client_strategy" in data:
+                    settings.client_strategy = data["client_strategy"]
         except Exception:
             pass
 
@@ -100,6 +123,13 @@ def save_settings(settings: AppSettings) -> None:
         "auto_start": settings.auto_start,
         "start_minimized": settings.start_minimized,
         "auto_run_server": settings.auto_run_server,
+        "close_to_background": settings.close_to_background,
+        "opencode_config_path": settings.opencode_config_path,
+        "opencode_provider_name": settings.opencode_provider_name,
+        "opencode_set_default_model": settings.opencode_set_default_model,
+        "opencode_default_model": settings.opencode_default_model,
+        "client_api_key": settings.client_api_key,
+        "client_strategy": settings.client_strategy,
     }
 
     config_path = get_config_path()
@@ -128,7 +158,19 @@ def get_exe_path() -> str:
         # PyInstaller 打包后
         return sys.executable
     else:
-        # 开发模式
+        # 开发/虚拟环境模式：优先使用 iflow2api-gui.exe（无控制台）
+        try:
+            exe_dir = Path(sys.executable).parent
+            gui_exe = exe_dir / "iflow2api-gui.exe"
+            if gui_exe.exists():
+                return f'"{str(gui_exe)}"'
+
+            pythonw = exe_dir / "pythonw.exe"
+            if pythonw.exists():
+                return f'"{str(pythonw)}" -m iflow2api.gui'
+        except Exception:
+            pass
+
         return f'"{sys.executable}" -m iflow2api.gui'
 
 

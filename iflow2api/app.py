@@ -10,21 +10,20 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .config import load_iflow_config, check_iflow_login, IFlowConfig
-from .proxy import IFlowProxy
+from .proxy_manager import ProxyManager
+from .routing import load_routing_config
 
 
-# 全局代理实例
-_proxy: Optional[IFlowProxy] = None
-_config: Optional[IFlowConfig] = None
+# 全局代理管理器
+_proxy_manager: Optional[ProxyManager] = None
 
 
-def get_proxy() -> IFlowProxy:
-    """获取代理实例"""
-    global _proxy, _config
-    if _proxy is None:
-        _config = load_iflow_config()
-        _proxy = IFlowProxy(_config)
-    return _proxy
+def get_proxy_manager() -> ProxyManager:
+    global _proxy_manager
+    if _proxy_manager is None:
+        routing = load_routing_config()
+        _proxy_manager = ProxyManager(routing)
+    return _proxy_manager
 
 
 @asynccontextmanager
@@ -32,15 +31,25 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时检查配置
     try:
-        config = load_iflow_config()
-        print(f"[iflow2api] 已加载 iFlow 配置")
-        print(f"[iflow2api] API Base URL: {config.base_url}")
-        print(f"[iflow2api] API Key: {config.api_key[:10]}...")
-        if config.model_name:
-            print(f"[iflow2api] 默认模型: {config.model_name}")
+        manager = get_proxy_manager()
+        routing = manager.routing
+
+        if routing.accounts:
+            print(f"[iflow2api] 已加载多账号配置: {len(routing.accounts)} 个账号")
+            print(
+                f"[iflow2api] 来访鉴权: {'启用' if routing.auth.enabled else '关闭'}"
+                + (" (required)" if (routing.auth.enabled and routing.auth.required) else "")
+            )
+        else:
+            config = load_iflow_config()
+            print(f"[iflow2api] 已加载 iFlow 配置")
+            print(f"[iflow2api] API Base URL: {config.base_url}")
+            print(f"[iflow2api] API Key: {config.api_key[:10]}...")
+            if config.model_name:
+                print(f"[iflow2api] 默认模型: {config.model_name}")
     except FileNotFoundError as e:
         print(f"[错误] {e}", file=sys.stderr)
-        print("[提示] 请先运行 'iflow' 命令并完成登录", file=sys.stderr)
+        print("[提示] 未检测到多账号配置时，需要先运行 'iflow' 命令并完成登录", file=sys.stderr)
         sys.exit(1)
     except ValueError as e:
         print(f"[错误] {e}", file=sys.stderr)
@@ -49,10 +58,10 @@ async def lifespan(app: FastAPI):
     yield
 
     # 关闭时清理
-    global _proxy
-    if _proxy:
-        await _proxy.close()
-        _proxy = None
+    global _proxy_manager
+    if _proxy_manager:
+        await _proxy_manager.close()
+        _proxy_manager = None
 
 
 # 创建 FastAPI 应用
@@ -116,7 +125,8 @@ async def root():
 @app.get("/health")
 async def health():
     """健康检查"""
-    is_logged_in = check_iflow_login()
+    manager = get_proxy_manager()
+    is_logged_in = bool(manager.routing.accounts) or check_iflow_login()
     return {
         "status": "healthy" if is_logged_in else "degraded",
         "iflow_logged_in": is_logged_in,
@@ -127,10 +137,31 @@ async def health():
 async def list_models():
     """获取可用模型列表"""
     try:
-        proxy = get_proxy()
+        manager = get_proxy_manager()
+        proxy = await manager.get_any_proxy()
         return await proxy.get_models()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/debug/accounts")
+async def debug_accounts(request: Request):
+    """
+    Debug endpoint for local observability.
+
+    - Never returns upstream secrets.
+    - If `keys.json` auth is enabled+required, requires a valid Bearer token.
+    """
+    manager = get_proxy_manager()
+    routing = manager.routing
+    if routing.auth.enabled and routing.auth.required:
+        token = request.headers.get("Authorization", "")
+        token = token[7:].strip() if token.lower().startswith("bearer ") else token.strip()
+        if not token or token not in routing.keys:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+    return {
+        "resilience": routing.resilience.model_dump(),
+        "accounts": manager.get_account_metrics(),
+    }
 
 
 @app.post("/v1/chat/completions")
@@ -143,12 +174,12 @@ async def chat_completions(request: Request):
         body = json.loads(body_bytes.decode("utf-8"))
         stream = body.get("stream", False)
 
-        proxy = get_proxy()
+        manager = get_proxy_manager()
 
         if stream:
             # 流式响应
             async def generate():
-                async for chunk in await proxy.chat_completions(body, stream=True):
+                async for chunk in await manager.chat_completions(request, body, stream=True):
                     yield chunk
 
             return StreamingResponse(
@@ -162,7 +193,7 @@ async def chat_completions(request: Request):
             )
         else:
             # 非流式响应
-            result = await proxy.chat_completions(body, stream=False)
+            result = await manager.chat_completions(request, body, stream=False)
             return JSONResponse(content=result)
 
     except json.JSONDecodeError as e:
@@ -198,9 +229,14 @@ def main():
     import uvicorn
 
     # 检查是否已登录
-    if not check_iflow_login():
-        print("[错误] iFlow 未登录", file=sys.stderr)
-        print("[提示] 请先运行 'iflow' 命令并完成登录", file=sys.stderr)
+    try:
+        manager = get_proxy_manager()
+        if not manager.routing.accounts and not check_iflow_login():
+            print("[错误] iFlow 未登录", file=sys.stderr)
+            print("[提示] 请先运行 'iflow' 命令并完成登录，或配置 ~/.iflow2api/keys.json", file=sys.stderr)
+            sys.exit(1)
+    except Exception as e:
+        print(f"[错误] {e}", file=sys.stderr)
         sys.exit(1)
 
     print("=" * 50)
