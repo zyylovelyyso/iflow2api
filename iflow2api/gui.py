@@ -169,7 +169,7 @@ class IFlow2ApiApp:
                 ]
             ),
             padding=15,
-            border=ft.Border.all(1, ft.Colors.OUTLINE),
+            border=ft.border.all(1, ft.Colors.OUTLINE),
             border_radius=8,
         )
 
@@ -214,7 +214,7 @@ class IFlow2ApiApp:
                 ]
             ),
             padding=15,
-            border=ft.Border.all(1, ft.Colors.OUTLINE),
+            border=ft.border.all(1, ft.Colors.OUTLINE),
             border_radius=8,
         )
 
@@ -254,13 +254,13 @@ class IFlow2ApiApp:
             content=ft.Column(
                 [
                     ft.Text("日志", weight=ft.FontWeight.BOLD),
-                    ft.Container(
-                        content=self.log_list,
-                        height=150,
-                        border=ft.Border.all(1, ft.Colors.OUTLINE),
-                        border_radius=8,
-                        padding=10,
-                    ),
+	                    ft.Container(
+	                        content=self.log_list,
+	                        height=150,
+	                        border=ft.border.all(1, ft.Colors.OUTLINE),
+	                        border_radius=8,
+	                        padding=10,
+	                    ),
                 ]
             ),
         )
@@ -325,7 +325,7 @@ class IFlow2ApiApp:
                 ]
             ),
             padding=15,
-            border=ft.Border.all(1, ft.Colors.OUTLINE),
+            border=ft.border.all(1, ft.Colors.OUTLINE),
             border_radius=8,
         )
 
@@ -435,7 +435,7 @@ class IFlow2ApiApp:
                 spacing=8,
             ),
             padding=12,
-            border=ft.Border.all(1, ft.Colors.OUTLINE),
+            border=ft.border.all(1, ft.Colors.OUTLINE),
             border_radius=8,
         )
 
@@ -516,7 +516,7 @@ class IFlow2ApiApp:
                 spacing=8,
             ),
             padding=12,
-            border=ft.Border.all(1, ft.Colors.OUTLINE),
+            border=ft.border.all(1, ft.Colors.OUTLINE),
             border_radius=8,
         )
 
@@ -535,7 +535,7 @@ class IFlow2ApiApp:
                     ),
                     ft.Container(
                         content=self.accounts_table,
-                        border=ft.Border.all(1, ft.Colors.OUTLINE),
+                        border=ft.border.all(1, ft.Colors.OUTLINE),
                         border_radius=8,
                         padding=8,
                     ),
@@ -545,7 +545,7 @@ class IFlow2ApiApp:
                 spacing=12,
             ),
             padding=15,
-            border=ft.Border.all(1, ft.Colors.OUTLINE),
+            border=ft.border.all(1, ft.Colors.OUTLINE),
             border_radius=8,
         )
 
@@ -976,10 +976,17 @@ class IFlow2ApiApp:
         handler.start_login()
 
 
-def main(page: ft.Page):
-    """Flet 应用入口"""
+def main(page: Optional[ft.Page] = None):
+    """Flet 应用入口 / CLI 入口。
+
+    - Flet 运行时会以 `main(page)` 形式调用（page 非空）。
+    - PyPI entrypoint 会以 `main()` 形式调用（page 为空），此时我们启动 Flet runtime。
+    """
+    if page is None:
+        ft.app(target=main)
+        return
     IFlow2ApiApp(page)
 
 
 if __name__ == "__main__":
-    ft.run(main)
+    ft.app(target=main)
