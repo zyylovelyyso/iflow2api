@@ -175,6 +175,15 @@ curl http://localhost:8000/v1/chat/completions \
 - Windows: `C:\\Users\\<用户名>\\.iflow2api\\keys.json`
 - Linux/Mac: `~/.iflow2api/keys.json`
 
+### OAuth 多账号（推荐：可自动续期）
+
+如果你用的是 iFlow 的 **浏览器登录（OAuth）**，建议用本项目的 GUI 添加账号：
+
+1. 在 Edge 里创建多个 Profile（每个 Profile 登录一个 iFlow 账号）
+2. 打开 `iflow2api` GUI → “账号池模式” → 选择 `Edge Profile` → 点击“添加账号（Edge Profile 登录）”
+3. 登录成功后会写入 `keys.json`，并保存 `oauth_refresh_token / oauth_expires_at`（不会在日志里打印明文）
+4. 服务启动后会后台自动刷新 OAuth token，并在遇到上游 `439 Token expired` 时自动刷新后重试
+
 示例 `keys.json`：
 
 ```json
@@ -200,6 +209,11 @@ curl http://localhost:8000/v1/chat/completions \
 - `max_concurrency` 为单个上游账号的并发上限（0 表示不限制）。
 - `accounts` 池支持 `least_busy`（按 in-flight 选择）或 `round_robin`。
 - `resilience`（可选）控制失败熔断与 failover（例如连续失败 N 次后临时禁用该账号一段时间，并在可重试错误上自动切换到另一个账号）。
+
+可选的 OAuth 字段（如果你用 GUI 的 OAuth 登录添加账号，会自动写入）：
+- `auth_type`: `"oauth-iflow"`
+- `oauth_access_token`, `oauth_refresh_token`
+- `oauth_expires_at`, `last_refresh_at`
 
 ### 稳定性（熔断 / failover）
 

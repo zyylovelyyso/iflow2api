@@ -7,17 +7,22 @@ import time
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Optional
 
+import httpx
 from fastapi import HTTPException, Request
 
+from datetime import datetime, timezone
+
 from .config import IFlowConfig, load_iflow_config
+from .oauth import IFlowOAuth
 from .proxy import IFlowProxy
-from .resilience import is_retryable_exception
+from .resilience import get_http_status_code, is_retryable_exception
 from .routing import (
     ApiKeyRoute,
     KeyRoutingConfig,
     get_routing_file_path_in_use,
     load_routing_config,
 )
+from .keys_store import save_keys_config
 
 def _normalize_model_id(model: Any) -> Any:
     """
@@ -28,6 +33,11 @@ def _normalize_model_id(model: Any) -> Any:
     if not isinstance(model, str):
         return model
     raw = model.strip()
+    # Some clients namespace model ids as "<provider>/<model>" (e.g. OpenCode).
+    if "/" in raw:
+        prefix, rest = raw.split("/", 1)
+        if prefix.strip().lower() in ("iflow", "iflow2api") and rest.strip():
+            raw = rest.strip()
     low = raw.lower()
     # iFlow ROME 30B sometimes appears in mixed-case UI/docs.
     if low == "iflow-rome-30ba3b":
@@ -45,6 +55,34 @@ def _extract_bearer_token(request: Request) -> Optional[str]:
     if auth.lower().startswith("bearer "):
         return auth[7:].strip()
     return auth.strip()
+
+def _is_upstream_token_expired(exc: Exception) -> bool:
+    """
+    Detect iFlow "API Token expired" errors.
+
+    Observed:
+    - HTTP 439 with a message like "Your API Token has expired..."
+    """
+    status = get_http_status_code(exc)
+    if status == 439:
+        return True
+    if status not in (401, 403, 400):
+        return False
+    resp = None
+    if isinstance(exc, httpx.HTTPStatusError):
+        resp = exc.response
+    else:
+        resp = getattr(exc, "response", None)
+    if resp is None:
+        return False
+    try:
+        data = resp.json()
+    except Exception:
+        return False
+    if not isinstance(data, dict):
+        return False
+    msg = str(data.get("msg") or data.get("message") or "").lower()
+    return ("token" in msg and "expired" in msg) or ("api token" in msg and "expire" in msg)
 
 
 @dataclass(frozen=True)
@@ -70,6 +108,7 @@ class ProxyManager:
         self._lock = asyncio.Lock()
         self._rr_index: dict[str, int] = {}
         self._account_state: dict[str, _AccountState] = {}
+        self._refresh_locks: dict[str, asyncio.Lock] = {}
         self._routing_path = get_routing_file_path_in_use()
         self._routing_mtime: float = 0.0
         if self._routing_path and self._routing_path.exists():
@@ -289,6 +328,56 @@ class ProxyManager:
                     best_id = aid
         return best_id or pool[0]
 
+    async def _refresh_account_oauth(self, account_id: str) -> bool:
+        """
+        Best-effort refresh for a specific upstream account.
+
+        Returns True when refreshed and persisted.
+        """
+        lock = self._refresh_locks.get(account_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._refresh_locks[account_id] = lock
+
+        async with lock:
+            await self._maybe_reload_routing()
+            acc = self._routing.accounts.get(account_id)
+            if not acc or not acc.oauth_refresh_token:
+                return False
+
+            oauth = IFlowOAuth()
+            try:
+                token_data = await oauth.refresh_token(acc.oauth_refresh_token)
+                access_token = token_data.get("access_token") or ""
+                user_info = await oauth.get_user_info(access_token)
+                api_key = user_info.get("apiKey") or user_info.get("searchApiKey")
+                if not api_key:
+                    return False
+
+                acc.api_key = api_key
+                acc.auth_type = acc.auth_type or "oauth-iflow"
+                acc.oauth_access_token = access_token
+                if token_data.get("refresh_token"):
+                    acc.oauth_refresh_token = token_data["refresh_token"]
+                if token_data.get("expires_at"):
+                    acc.oauth_expires_at = token_data["expires_at"]
+                acc.last_refresh_at = datetime.now(timezone.utc)
+
+                if self._routing_path:
+                    save_keys_config(self._routing, self._routing_path)
+                    try:
+                        self._routing_mtime = self._routing_path.stat().st_mtime
+                    except Exception:
+                        pass
+
+                proxy = self._proxies.get(account_id)
+                if proxy:
+                    proxy.config.api_key = api_key
+
+                return True
+            finally:
+                await oauth.close()
+
     async def chat_completions(
         self,
         request: Request,
@@ -362,7 +451,14 @@ class ProxyManager:
 
             try:
                 if not stream:
-                    result = await proxy.chat_completions(body, stream=False)
+                    try:
+                        result = await proxy.chat_completions(body, stream=False)
+                    except Exception as ex:
+                        if _is_upstream_token_expired(ex) and await self._refresh_account_oauth(account_id):
+                            proxy = await self._get_or_create_account_proxy(account_id)
+                            result = await proxy.chat_completions(body, stream=False)
+                        else:
+                            raise
                     self._record_success(account_id)
                     return result
 
@@ -376,6 +472,13 @@ class ProxyManager:
                         if False:
                             yield b""
                     return empty()
+                except Exception as ex:
+                    if _is_upstream_token_expired(ex) and await self._refresh_account_oauth(account_id):
+                        proxy = await self._get_or_create_account_proxy(account_id)
+                        stream_iter = await proxy.chat_completions(body, stream=True)
+                        first = await stream_iter.__anext__()
+                    else:
+                        raise
 
                 async def gen() -> AsyncIterator[bytes]:
                     yield first

@@ -2,7 +2,7 @@
 
 import httpx
 from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 class IFlowOAuth:
@@ -83,7 +83,7 @@ class IFlowOAuth:
 
         if "expires_in" in token_data:
             expires_in = token_data["expires_in"]
-            token_data["expires_at"] = datetime.now() + timedelta(seconds=expires_in)
+            token_data["expires_at"] = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
 
         return token_data
 
@@ -126,7 +126,7 @@ class IFlowOAuth:
 
         if "expires_in" in token_data:
             expires_in = token_data["expires_in"]
-            token_data["expires_at"] = datetime.now() + timedelta(seconds=expires_in)
+            token_data["expires_at"] = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
 
         return token_data
 
@@ -211,4 +211,5 @@ class IFlowOAuth:
         """检查 token 是否即将过期"""
         if expires_at is None:
             return False
-        return datetime.now() >= (expires_at - timedelta(seconds=buffer_seconds))
+        now = datetime.now(tz=expires_at.tzinfo) if expires_at.tzinfo else datetime.now()
+        return now >= (expires_at - timedelta(seconds=buffer_seconds))

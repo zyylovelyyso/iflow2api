@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 from typing import Literal, Optional
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field, ValidationError
 
 from .settings import get_config_dir
@@ -29,6 +31,12 @@ class IFlowUpstreamAccount(BaseModel):
     enabled: bool = Field(default=True, description="Whether this upstream account can be used")
     label: Optional[str] = Field(default=None, description="Human-readable label (e.g. username/phone)")
     created_at: Optional[str] = Field(default=None, description="ISO timestamp when added")
+    # Optional OAuth fields (used for auto-refresh); safe to leave empty for api-key accounts.
+    auth_type: Optional[str] = Field(default=None, description="Auth type: oauth-iflow / api-key")
+    oauth_access_token: Optional[str] = Field(default=None, description="OAuth access token")
+    oauth_refresh_token: Optional[str] = Field(default=None, description="OAuth refresh token")
+    oauth_expires_at: Optional[datetime] = Field(default=None, description="OAuth expiry time")
+    last_refresh_at: Optional[datetime] = Field(default=None, description="Last refresh time")
 
 
 class ApiKeyRoute(BaseModel):

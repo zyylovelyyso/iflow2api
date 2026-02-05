@@ -1,7 +1,7 @@
 """Flet GUI 应用"""
 
 import flet as ft
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 import threading
 from pathlib import Path
@@ -57,6 +57,7 @@ class IFlow2ApiApp:
         # UI 组件
         self.status_icon: Optional[ft.Icon] = None
         self.status_text: Optional[ft.Text] = None
+        self.accounts_summary: Optional[ft.Text] = None
         self.host_field: Optional[ft.TextField] = None
         self.port_field: Optional[ft.TextField] = None
         # 单账号模式（可选）
@@ -70,6 +71,7 @@ class IFlow2ApiApp:
         # 多账号模式 UI
         self.client_key_field: Optional[ft.TextField] = None
         self.strategy_dropdown: Optional[ft.Dropdown] = None
+        self.edge_profile_dropdown: Optional[ft.Dropdown] = None
         self.accounts_table: Optional[ft.DataTable] = None
         self.res_failure_threshold: Optional[ft.TextField] = None
         self.res_cool_down: Optional[ft.TextField] = None
@@ -138,9 +140,16 @@ class IFlow2ApiApp:
         # 状态栏
         self.status_icon = ft.Icon(ft.Icons.CIRCLE, color=ft.Colors.GREY, size=16)
         self.status_text = ft.Text("服务未运行", size=14)
+        self.accounts_summary = ft.Text("", size=12, color=ft.Colors.GREY_700)
 
         status_row = ft.Container(
-            content=ft.Row([self.status_icon, self.status_text]),
+            content=ft.Row(
+                [
+                    ft.Row([self.status_icon, self.status_text], spacing=8),
+                    self.accounts_summary,
+                ],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            ),
             padding=10,
             bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
             border_radius=8,
@@ -359,11 +368,39 @@ class IFlow2ApiApp:
             width=180,
         )
 
+        # Edge profile 用于多账号 OAuth（每个 profile 对应一个登录态）
+        from .edge import list_edge_profiles
+
+        edge_profiles = list_edge_profiles()
+        edge_options = [
+            ft.dropdown.Option(p.directory, f"{p.name} ({p.directory})")
+            for p in edge_profiles
+        ] or [ft.dropdown.Option("Default", "Default")]
+
+        self.edge_profile_dropdown = ft.Dropdown(
+            label="Edge Profile（多账号）",
+            options=edge_options,
+            value=edge_profiles[0].directory if edge_profiles else "Default",
+            width=260,
+        )
+
+        refresh_edge_profiles_btn = ft.TextButton(
+            "刷新 Profile",
+            icon=ft.Icons.REFRESH,
+            on_click=self._refresh_edge_profiles,
+        )
+
         add_account_btn = ft.Button(
-            "添加账号（OAuth 登录）",
+            "添加账号（Edge Profile 登录）",
             icon=ft.Icons.ADD,
-            on_click=self._add_account_with_oauth,
+            on_click=self._add_account_with_oauth_edge_profile,
             style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE, color=ft.Colors.WHITE),
+        )
+
+        add_account_inprivate_btn = ft.TextButton(
+            "Edge InPrivate 登录（临时）",
+            icon=ft.Icons.OPEN_IN_BROWSER,
+            on_click=self._add_account_with_oauth_edge_inprivate,
         )
 
         import_as_account_btn = ft.TextButton(
@@ -527,8 +564,15 @@ class IFlow2ApiApp:
         pool_hint_controls: list[ft.Control] = []
         if not self.routing.accounts:
             pool_hint_controls.append(
-                ft.Text("账号池为空：请先点击「添加账号（OAuth 登录）」", color=ft.Colors.ORANGE)
+                ft.Text("账号池为空：请先点击「添加账号（Edge Profile 登录）」", color=ft.Colors.ORANGE)
             )
+        pool_hint_controls.append(
+            ft.Text(
+                "提示：要用多个 iFlow 账号，请在 Edge 里新建多个 Profile，并用不同 Profile 分别登录。",
+                size=12,
+                color=ft.Colors.GREY_700,
+            )
+        )
         pool_hint_controls.append(
             ft.Text(f"账号池文件: {keys_path}", size=12, selectable=True)
         )
@@ -538,7 +582,8 @@ class IFlow2ApiApp:
                 [
                     ft.Text("账号池模式（推荐）", weight=ft.FontWeight.BOLD),
                     ft.Row([self.client_key_field, regen_btn]),
-                    ft.Row([self.strategy_dropdown, add_account_btn, import_as_account_btn], wrap=True),
+                    ft.Row([self.strategy_dropdown, self.edge_profile_dropdown, refresh_edge_profiles_btn], wrap=True),
+                    ft.Row([add_account_btn, add_account_inprivate_btn, import_as_account_btn], wrap=True),
                     *pool_hint_controls,
                     ft.Text(
                         f"本地 Base URL: http://127.0.0.1:{self.settings.port}/v1",
@@ -665,6 +710,17 @@ class IFlow2ApiApp:
         except Exception as e:
             self._add_log(f"保存 keys.json 失败: {e}")
 
+    def _update_accounts_summary(self):
+        if not self.accounts_summary:
+            return
+        total = len(self.routing.accounts)
+        enabled = sum(1 for a in self.routing.accounts.values() if getattr(a, "enabled", True))
+        oauth = sum(1 for a in self.routing.accounts.values() if getattr(a, "oauth_refresh_token", None))
+        if total <= 0:
+            self.accounts_summary.value = "账号池: 0"
+        else:
+            self.accounts_summary.value = f"账号池: {enabled}/{total} · oauth {oauth}"
+
     def _refresh_accounts_table(self):
         if not self.accounts_table:
             return
@@ -694,11 +750,34 @@ class IFlow2ApiApp:
                 on_click=lambda e, aid=account_id: self._remove_account(aid),
             )
 
+            auth_kind = "oauth" if getattr(acc, "oauth_refresh_token", None) else "api-key"
+            extra = auth_kind
+            exp = getattr(acc, "oauth_expires_at", None)
+            if exp is not None:
+                try:
+                    now = datetime.now(tz=exp.tzinfo) if getattr(exp, "tzinfo", None) else datetime.now()
+                    seconds = int((exp - now).total_seconds())
+                    if seconds < 0:
+                        extra = f"{auth_kind} · expired"
+                    else:
+                        minutes = max(0, seconds // 60)
+                        extra = f"{auth_kind} · exp {minutes}m"
+                except Exception:
+                    pass
+
+            label_cell = ft.Column(
+                [
+                    ft.Text(acc.label or account_id),
+                    ft.Text(extra, size=11, color=ft.Colors.GREY_600),
+                ],
+                spacing=2,
+            )
+
             rows.append(
                 ft.DataRow(
                     cells=[
                         ft.DataCell(enabled_switch),
-                        ft.DataCell(ft.Text(acc.label or account_id)),
+                        ft.DataCell(label_cell),
                         ft.DataCell(ft.Text(key_mask)),
                         ft.DataCell(concurrency_field),
                         ft.DataCell(remove_btn),
@@ -707,6 +786,7 @@ class IFlow2ApiApp:
             )
 
         self.accounts_table.rows = rows
+        self._update_accounts_summary()
 
     def _refresh_resilience_fields(self):
         if not self.res_failure_threshold:
@@ -797,7 +877,38 @@ class IFlow2ApiApp:
         self._refresh_accounts_table()
         self.page.update()
 
-    def _add_account_with_oauth(self, e):
+    def _refresh_edge_profiles(self, e):
+        from .edge import list_edge_profiles
+
+        profiles = list_edge_profiles()
+        options = [
+            ft.dropdown.Option(p.directory, f"{p.name} ({p.directory})")
+            for p in profiles
+        ] or [ft.dropdown.Option("Default", "Default")]
+
+        if self.edge_profile_dropdown:
+            self.edge_profile_dropdown.options = options
+            if profiles and (not self.edge_profile_dropdown.value):
+                self.edge_profile_dropdown.value = profiles[0].directory
+        self.page.update()
+
+    def _add_account_with_oauth_edge_profile(self, e):
+        profile = (self.edge_profile_dropdown.value or "").strip() if self.edge_profile_dropdown else ""
+        if not profile:
+            self.page.open(ft.SnackBar(content=ft.Text("请选择 Edge Profile"), bgcolor=ft.Colors.RED))
+            return
+        self._add_account_with_oauth(e, browser="edge_profile", edge_profile_directory=profile)
+
+    def _add_account_with_oauth_edge_inprivate(self, e):
+        self._add_account_with_oauth(e, browser="edge_inprivate", edge_profile_directory=None)
+
+    def _add_account_with_oauth(
+        self,
+        e,
+        *,
+        browser: str = "system",
+        edge_profile_directory: Optional[str] = None,
+    ):
         """OAuth 登录并将账号写入 keys.json（多账号模式）。"""
         from .oauth_login import OAuthLoginHandler
 
@@ -815,6 +926,10 @@ class IFlow2ApiApp:
                 base_url=config.base_url,
                 label=label,
                 max_concurrency=4,
+                auth_type="oauth-iflow",
+                oauth_access_token=getattr(config, "oauth_access_token", None) or token_data.get("access_token"),
+                oauth_refresh_token=getattr(config, "oauth_refresh_token", None) or token_data.get("refresh_token"),
+                oauth_expires_at=getattr(config, "oauth_expires_at", None) or token_data.get("expires_at"),
             )
             ensure_opencode_route(
                 cfg,
@@ -832,7 +947,7 @@ class IFlow2ApiApp:
             success_callback=None,
             save_callback=save_callback,
         )
-        handler.start_login()
+        handler.start_login(browser=browser, edge_profile_directory=edge_profile_directory)
 
     def _configure_opencode(self, e):
         """一键写入 OpenCode 配置文件，添加 provider=iflow。"""

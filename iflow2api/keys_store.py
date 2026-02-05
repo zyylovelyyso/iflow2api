@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,8 +26,29 @@ def save_keys_config(cfg: KeyRoutingConfig, path: Optional[Path] = None) -> Path
     if path is None:
         path = get_keys_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = cfg.model_dump()
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Use JSON mode to safely serialize datetime fields (oauth_expires_at, etc.).
+    data = cfg.model_dump(mode="json")
+    payload = json.dumps(data, ensure_ascii=False, indent=2)
+
+    # Atomic write to reduce the chance of partial reads by the server.
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=str(path.parent),
+            delete=False,
+            prefix=path.name + ".tmp.",
+        ) as f:
+            f.write(payload)
+            tmp_path = Path(f.name)
+        tmp_path.replace(path)
+    finally:
+        try:
+            if tmp_path and tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)  # type: ignore[arg-type]
+        except Exception:
+            pass
     return path
 
 
@@ -57,6 +79,10 @@ def add_upstream_account(
     base_url: str = "https://apis.iflow.cn/v1",
     label: Optional[str] = None,
     max_concurrency: int = 4,
+    auth_type: Optional[str] = None,
+    oauth_access_token: Optional[str] = None,
+    oauth_refresh_token: Optional[str] = None,
+    oauth_expires_at: Optional[datetime] = None,
 ) -> AddAccountResult:
     account_id = _next_account_id(set(cfg.accounts.keys()))
     label_final = label or account_id
@@ -67,6 +93,10 @@ def add_upstream_account(
         enabled=True,
         label=label_final,
         created_at=_now_iso(),
+        auth_type=auth_type,
+        oauth_access_token=oauth_access_token,
+        oauth_refresh_token=oauth_refresh_token,
+        oauth_expires_at=oauth_expires_at,
     )
     return AddAccountResult(account_id=account_id, label=label_final)
 

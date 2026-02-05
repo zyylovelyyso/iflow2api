@@ -8,6 +8,7 @@ from typing import Optional, Callable, Any
 from .oauth import IFlowOAuth
 from .web_server import OAuthCallbackServer, find_available_port
 from .config import load_iflow_config, save_iflow_config, IFlowConfig
+from .edge import launch_edge
 
 
 class OAuthLoginHandler:
@@ -32,8 +33,22 @@ class OAuthLoginHandler:
         self.save_callback = save_callback
         self._is_logging_in = False  # 防止重复登录
 
-    def start_login(self):
-        """启动 OAuth 登录流程"""
+    def start_login(
+        self,
+        *,
+        browser: str = "system",
+        edge_profile_directory: Optional[str] = None,
+    ):
+        """启动 OAuth 登录流程
+
+        Args:
+            browser:
+                - system: 系统默认浏览器
+                - edge: Microsoft Edge（默认 profile）
+                - edge_profile: Microsoft Edge 指定 profile（建议用于多账号）
+                - edge_inprivate: Microsoft Edge InPrivate（不持久化登录态）
+            edge_profile_directory: Edge profile 目录名，如 "Default"、"Profile 1"
+        """
         if self._is_logging_in:
             self.add_log("OAuth 登录正在进行中，请勿重复点击")
             return
@@ -64,7 +79,22 @@ class OAuthLoginHandler:
                 oauth = IFlowOAuth()
                 auth_url = oauth.get_auth_url(redirect_uri=server.get_callback_url())
                 self.add_log(f"授权链接: {auth_url}")
-                webbrowser.open(auth_url)
+
+                opened = False
+                mode = (browser or "system").strip().lower()
+                if mode in ("edge", "msedge"):
+                    opened = launch_edge(auth_url, new_window=True)
+                elif mode in ("edge_profile", "edge-profile", "edgeprofile"):
+                    opened = launch_edge(
+                        auth_url,
+                        profile_directory=edge_profile_directory,
+                        new_window=True,
+                    )
+                elif mode in ("edge_inprivate", "edge-inprivate", "inprivate"):
+                    opened = launch_edge(auth_url, inprivate=True, new_window=True)
+
+                if not opened:
+                    webbrowser.open(auth_url)
                 self.add_log("已打开浏览器，请完成授权...")
 
                 # 4. 等待回调

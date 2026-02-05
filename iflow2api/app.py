@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from .config import load_iflow_config, check_iflow_login, IFlowConfig
 from .proxy_manager import ProxyManager
 from .routing import load_routing_config
+from .routing_refresher import start_global_routing_refresher, stop_global_routing_refresher
 
 
 # 全局代理管理器
@@ -40,6 +41,8 @@ async def lifespan(app: FastAPI):
                 f"[iflow2api] 来访鉴权: {'启用' if routing.auth.enabled else '关闭'}"
                 + (" (required)" if (routing.auth.enabled and routing.auth.required) else "")
             )
+            # Multi-account auto-refresh (best-effort, no secrets printed).
+            start_global_routing_refresher(log=lambda s: print(f"[iflow2api] {s}"))
         else:
             config = load_iflow_config()
             print(f"[iflow2api] 已加载 iFlow 配置")
@@ -58,6 +61,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # 关闭时清理
+    stop_global_routing_refresher()
     global _proxy_manager
     if _proxy_manager:
         await _proxy_manager.close()
@@ -126,10 +130,18 @@ async def root():
 async def health():
     """健康检查"""
     manager = get_proxy_manager()
-    is_logged_in = bool(manager.routing.accounts) or check_iflow_login()
+    routing = manager.routing
+    is_logged_in = bool(routing.accounts) or check_iflow_login()
+    accounts_total = len(routing.accounts)
+    accounts_enabled = sum(1 for a in routing.accounts.values() if getattr(a, "enabled", True)) if routing.accounts else 0
+    oauth_accounts = sum(1 for a in routing.accounts.values() if getattr(a, "oauth_refresh_token", None)) if routing.accounts else 0
     return {
         "status": "healthy" if is_logged_in else "degraded",
         "iflow_logged_in": is_logged_in,
+        "multi_account": bool(routing.accounts),
+        "accounts_total": accounts_total,
+        "accounts_enabled": accounts_enabled,
+        "oauth_accounts": oauth_accounts,
     }
 
 
