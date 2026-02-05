@@ -110,57 +110,222 @@ UI_HTML = """<!doctype html>
     <title>iflow2api 控制台</title>
     <style>
       :root {
-        --bg: #0b0f17;
-        --card: #121a2a;
-        --muted: #9db0c8;
-        --text: #e6eef8;
-        --accent: #4aa3ff;
+        --bg0: #05070d;
+        --bg1: #0b1020;
+        --text: #e7f0ff;
+        --muted: rgba(231,240,255,0.66);
+        --faint: rgba(231,240,255,0.42);
+        --accent: #51d6ff;
+        --accent2: #b6ff6f;
         --good: #2ecc71;
-        --warn: #f39c12;
-        --bad: #e74c3c;
-        --border: rgba(255,255,255,.10);
+        --warn: #f5b942;
+        --bad: #ff4d6d;
+        --border: rgba(255,255,255,0.10);
+        --border2: rgba(255,255,255,0.16);
+        --shadow: 0 18px 50px rgba(0,0,0,.45);
+        --radius: 16px;
       }
-      body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: var(--bg); color: var(--text); }
+      * { box-sizing: border-box; }
+      body {
+        margin:0;
+        min-height:100vh;
+        color: var(--text);
+        background: linear-gradient(180deg, var(--bg1), var(--bg0) 60%, #04060c 100%);
+        font-family: "Segoe UI Variable Display", "Bahnschrift", "Segoe UI", system-ui, sans-serif;
+        letter-spacing: 0.2px;
+      }
+      body::before {
+        content:"";
+        position: fixed;
+        inset:0;
+        pointer-events:none;
+        background:
+          radial-gradient(900px 520px at 12% 10%, rgba(81,214,255,.22), transparent 60%),
+          radial-gradient(900px 520px at 88% 18%, rgba(182,255,111,.16), transparent 58%),
+          radial-gradient(700px 520px at 70% 92%, rgba(170,120,255,.12), transparent 60%);
+        mix-blend-mode: screen;
+        opacity: 0.85;
+      }
+      body::after {
+        content:"";
+        position: fixed;
+        inset:-180px;
+        pointer-events:none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)' opacity='.25'/%3E%3C/svg%3E");
+        opacity: 0.08;
+        mix-blend-mode: overlay;
+      }
       a { color: var(--accent); text-decoration: none; }
-      .wrap { max-width: 980px; margin: 24px auto; padding: 0 16px; }
-      .top { display:flex; align-items:center; justify-content:space-between; gap:16px; }
-      .title { font-size: 18px; font-weight: 700; }
-      .pill { padding: 6px 10px; border-radius: 999px; background: rgba(255,255,255,.06); border: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+      .wrap { max-width: 1040px; margin: 26px auto; padding: 0 16px 40px; }
+      .hero {
+        display:flex;
+        align-items:flex-end;
+        justify-content:space-between;
+        gap: 16px;
+        padding: 14px 14px 16px;
+        border-radius: var(--radius);
+        background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow);
+        position: sticky;
+        top: 10px;
+        z-index: 5;
+        backdrop-filter: blur(10px);
+      }
+      .brand { display:flex; gap: 12px; align-items:center; }
+      .logo {
+        width: 42px;
+        height: 42px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, rgba(81,214,255,.28), rgba(182,255,111,.14));
+        border: 1px solid rgba(81,214,255,.35);
+        box-shadow: 0 12px 30px rgba(81,214,255,.10);
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-weight: 800;
+        letter-spacing: .8px;
+        color: #dff8ff;
+      }
+      .title { font-size: 18px; font-weight: 800; line-height: 1.1; }
+      .subtitle { font-size: 12px; color: var(--muted); margin-top: 4px; }
+      .heroRight { display:flex; align-items:center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+      .pill {
+        display:flex;
+        align-items:center;
+        gap: 8px;
+        padding: 7px 10px;
+        border-radius: 999px;
+        background: rgba(0,0,0,.22);
+        border: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .dot { width: 8px; height: 8px; border-radius: 999px; background: var(--warn); box-shadow: 0 0 0 4px rgba(245,185,66,.12); }
+      .pill.good .dot { background: var(--good); box-shadow: 0 0 0 4px rgba(46,204,113,.12); }
+      .pill.bad .dot { background: var(--bad); box-shadow: 0 0 0 4px rgba(255,77,109,.12); }
       .grid { display:grid; grid-template-columns: 1fr; gap: 14px; margin-top: 14px; }
-      @media (min-width: 900px) { .grid { grid-template-columns: 1.2fr .8fr; } }
-      .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 14px; }
-      .card h2 { margin: 0 0 10px 0; font-size: 14px; color: #cfe0f7; }
-      .row { display:flex; gap: 10px; align-items:center; flex-wrap: wrap; }
+      @media (min-width: 980px) { .grid { grid-template-columns: 1.25fr .75fr; } }
+      .card {
+        background: linear-gradient(180deg, rgba(18,26,42,.82), rgba(18,26,42,.56));
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 14px;
+        box-shadow: 0 14px 35px rgba(0,0,0,.25);
+        backdrop-filter: blur(10px);
+      }
+      .cardHeader { display:flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+      .card h2 { margin: 0; font-size: 13px; letter-spacing: .4px; text-transform: uppercase; color: rgba(231,240,255,.82); }
+      .hint { font-size: 12px; color: var(--faint); }
+      .row { display:flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
       .col { display:flex; flex-direction: column; gap: 8px; }
       label { font-size: 12px; color: var(--muted); }
-      input, select { background: rgba(0,0,0,.25); border: 1px solid var(--border); color: var(--text); border-radius: 10px; padding: 10px 10px; outline: none; min-width: 220px; }
+      input, select {
+        background: rgba(0,0,0,.22);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 12px;
+        padding: 10px 10px;
+        outline: none;
+        min-width: 220px;
+        transition: border-color .15s ease, box-shadow .15s ease, transform .08s ease;
+      }
       input[type=number] { min-width: 120px; }
-      button { border: 1px solid var(--border); background: rgba(255,255,255,.06); color: var(--text); border-radius: 10px; padding: 10px 12px; cursor: pointer; }
-      button.primary { background: rgba(74,163,255,.18); border-color: rgba(74,163,255,.35); }
-      button.danger { background: rgba(231,76,60,.18); border-color: rgba(231,76,60,.35); }
-      button:disabled { opacity: .5; cursor: not-allowed; }
-      .kv { display:grid; grid-template-columns: 160px 1fr; gap: 8px; font-size: 12px; color: var(--muted); }
-      .kv div:nth-child(2n) { color: var(--text); overflow-wrap: anywhere; }
-      table { width: 100%; border-collapse: collapse; font-size: 12px; }
-      th, td { padding: 10px 8px; border-top: 1px solid var(--border); vertical-align: top; }
+      input:focus, select:focus { border-color: rgba(81,214,255,.55); box-shadow: 0 0 0 4px rgba(81,214,255,.12); }
+      select {
+        appearance: none;
+        background-image:
+          linear-gradient(45deg, transparent 50%, rgba(231,240,255,.55) 50%),
+          linear-gradient(135deg, rgba(231,240,255,.55) 50%, transparent 50%);
+        background-position: calc(100% - 16px) calc(50% - 2px), calc(100% - 11px) calc(50% - 2px);
+        background-size: 5px 5px, 5px 5px;
+        background-repeat: no-repeat;
+        padding-right: 30px;
+      }
+      button {
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,.06);
+        color: var(--text);
+        border-radius: 12px;
+        padding: 10px 12px;
+        cursor: pointer;
+        transition: transform .08s ease, background .15s ease, border-color .15s ease, box-shadow .15s ease;
+      }
+      button:hover { transform: translateY(-1px); border-color: rgba(255,255,255,.20); background: rgba(255,255,255,.08); }
+      button:active { transform: translateY(0px); }
+      button.primary { background: linear-gradient(180deg, rgba(81,214,255,.26), rgba(81,214,255,.10)); border-color: rgba(81,214,255,.42); box-shadow: 0 12px 26px rgba(81,214,255,.10); }
+      button.primary:hover { border-color: rgba(81,214,255,.70); }
+      button.ghost { background: transparent; }
+      button.danger { background: linear-gradient(180deg, rgba(255,77,109,.22), rgba(255,77,109,.10)); border-color: rgba(255,77,109,.42); }
+      button.danger:hover { border-color: rgba(255,77,109,.70); }
+      button.mini { padding: 6px 9px; border-radius: 10px; font-size: 12px; }
+      button:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+      .kv { display:grid; grid-template-columns: 140px 1fr; gap: 10px; font-size: 12px; color: var(--muted); }
+      .kv .v { color: var(--text); overflow-wrap: anywhere; display:flex; align-items:center; gap: 8px; flex-wrap: wrap; }
+      code {
+        font-family: "Cascadia Code", "Cascadia Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+        background: rgba(0,0,0,.20);
+        border: 1px solid rgba(255,255,255,.10);
+        padding: 3px 6px;
+        border-radius: 9px;
+      }
+      table { width: 100%; border-collapse: collapse; font-size: 12px; overflow:hidden; border-radius: 14px; border: 1px solid rgba(255,255,255,.08); }
+      thead { background: rgba(255,255,255,.04); }
+      th, td { padding: 10px 8px; border-top: 1px solid rgba(255,255,255,.07); vertical-align: top; }
       th { text-align: left; color: var(--muted); font-weight: 600; }
-      .tag { display:inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); font-size: 11px; }
+      tbody tr:nth-child(2n) { background: rgba(255,255,255,.02); }
+      tbody tr:hover { background: rgba(81,214,255,.06); }
+      .tag { display:inline-flex; align-items:center; gap: 6px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); font-size: 11px; }
       .tag.good { color: var(--good); border-color: rgba(46,204,113,.35); background: rgba(46,204,113,.10); }
-      .tag.warn { color: var(--warn); border-color: rgba(243,156,18,.35); background: rgba(243,156,18,.10); }
-      .tag.bad { color: var(--bad); border-color: rgba(231,76,60,.35); background: rgba(231,76,60,.10); }
-      .log { height: 160px; overflow:auto; background: rgba(0,0,0,.20); border: 1px solid var(--border); border-radius: 12px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: #cfe0f7; }
+      .tag.warn { color: var(--warn); border-color: rgba(245,185,66,.35); background: rgba(245,185,66,.10); }
+      .tag.bad { color: var(--bad); border-color: rgba(255,77,109,.35); background: rgba(255,77,109,.10); }
+      .log { height: 180px; overflow:auto; background: rgba(0,0,0,.18); border: 1px solid rgba(255,255,255,.10); border-radius: 14px; padding: 10px; font-family: "Cascadia Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: rgba(231,240,255,.88); }
+      .toast {
+        position: fixed;
+        left: 50%;
+        bottom: 18px;
+        transform: translateX(-50%);
+        padding: 10px 12px;
+        border-radius: 999px;
+        background: rgba(10,14,24,.72);
+        border: 1px solid rgba(255,255,255,.14);
+        box-shadow: 0 18px 40px rgba(0,0,0,.35);
+        color: rgba(231,240,255,.92);
+        font-size: 12px;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity .2s ease, transform .2s ease;
+        backdrop-filter: blur(10px);
+      }
+      .toast.show { opacity: 1; transform: translateX(-50%) translateY(-6px); }
+      .toast.good { border-color: rgba(46,204,113,.35); }
+      .toast.bad { border-color: rgba(255,77,109,.35); }
     </style>
   </head>
   <body>
     <div class="wrap">
-      <div class="top">
-        <div class="title">iflow2api 控制台</div>
-        <div class="pill" id="statusPill">加载中...</div>
+      <div class="hero">
+        <div class="brand">
+          <div class="logo">IF</div>
+          <div>
+            <div class="title">iflow2api 控制台</div>
+            <div class="subtitle">本地网关 · 多账号负载均衡 · Edge Profile OAuth</div>
+          </div>
+        </div>
+        <div class="heroRight">
+          <div class="pill" id="statusPill"><span class="dot"></span><span id="statusText">加载中...</span></div>
+          <button class="ghost mini" id="btnProfiles">刷新 Profiles</button>
+          <button class="ghost mini" id="btnRefresh">刷新状态</button>
+        </div>
       </div>
 
       <div class="grid">
         <div class="card">
-          <h2>账号池（多账号负载均衡）</h2>
+          <div class="cardHeader">
+            <h2>账号池（多账号负载均衡）</h2>
+            <div class="hint">建议：Edge 每个账号一个 Profile</div>
+          </div>
           <div class="row" style="margin-bottom: 10px;">
             <div class="col">
               <label>Edge Profile（每个账号建议一个 Profile）</label>
@@ -177,8 +342,7 @@ UI_HTML = """<!doctype html>
           </div>
           <div class="row">
             <button class="primary" id="btnAdd">添加账号（Edge Profile OAuth）</button>
-            <button id="btnAddInPrivate">InPrivate 临时登录</button>
-            <button id="btnRefresh">刷新状态</button>
+            <button class="ghost" id="btnAddInPrivate">InPrivate 临时登录</button>
           </div>
           <div style="height: 10px"></div>
           <table>
@@ -197,21 +361,41 @@ UI_HTML = """<!doctype html>
         </div>
 
         <div class="card">
-          <h2>OpenCode / 客户端接入</h2>
+          <div class="cardHeader">
+            <h2>OpenCode / 客户端接入</h2>
+            <div class="hint">复制 Base URL + 本地 API Key</div>
+          </div>
           <div class="kv" id="kv"></div>
           <div style="height: 10px"></div>
-          <h2>日志</h2>
+          <div class="cardHeader" style="margin-top: 8px;">
+            <h2>日志</h2>
+            <div class="hint">只写本地信息，不显示明文密钥</div>
+          </div>
           <div class="log" id="log"></div>
         </div>
       </div>
     </div>
+    <div id="toast" class="toast"></div>
 
     <script>
       const logEl = document.getElementById("log");
       const statusPill = document.getElementById("statusPill");
+      const statusText = document.getElementById("statusText");
       const kv = document.getElementById("kv");
       const accountsBody = document.getElementById("accountsBody");
       const edgeProfile = document.getElementById("edgeProfile");
+      const toastEl = document.getElementById("toast");
+      let toastTimer = null;
+
+      function toast(msg, kind) {
+        if (!toastEl) return;
+        toastEl.textContent = msg;
+        toastEl.className = "toast show" + (kind ? (" " + kind) : "");
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => {
+          toastEl.classList.remove("show");
+        }, 2200);
+      }
 
       function log(line) {
         const ts = new Date().toLocaleTimeString();
@@ -245,16 +429,60 @@ UI_HTML = """<!doctype html>
         return await r.json();
       }
 
+      function bindCopyButtons() {
+        document.querySelectorAll("[data-copy]").forEach((btn) => {
+          if (btn.dataset.bound === "1") return;
+          btn.dataset.bound = "1";
+          btn.addEventListener("click", async () => {
+            const text = btn.getAttribute("data-copy") || "";
+            const label = btn.getAttribute("data-label") || "内容";
+            try {
+              await navigator.clipboard.writeText(text);
+              toast(`已复制：${label}`, "good");
+            } catch (e) {
+              toast("复制失败（浏览器权限）", "bad");
+            }
+          });
+        });
+      }
+
       function renderKV(state) {
         const baseURL = state.base_url || "";
         const apiKey = state.client_api_key || "";
+        const apiKeyMask = state.client_api_key_mask || "";
         kv.innerHTML = `
-          <div>Base URL</div><div><code>${baseURL}</code></div>
-          <div>API Key（本地）</div><div><code>${apiKey}</code></div>
-          <div>策略</div><div><code>${state.client_strategy}</code></div>
-          <div>账号池</div><div>${state.accounts_enabled}/${state.accounts_total} · oauth ${state.oauth_accounts}</div>
-          <div>提示</div><div>这个 Key 是本地网关用的，不是 iFlow/OpenAI Key。把它填进 OpenCode 的 provider=iflow 即可。</div>
+          <div>Base URL</div>
+          <div class="v"><code>${baseURL}</code><button class="mini" data-copy="${baseURL}" data-label="Base URL">复制</button></div>
+
+          <div>API Key（本地）</div>
+          <div class="v">
+            <code id="clientKeyCode" data-full="${apiKey}">${apiKeyMask || apiKey}</code>
+            <button class="mini ghost" id="btnRevealKey">显示</button>
+            <button class="mini" data-copy="${apiKey}" data-label="API Key">复制</button>
+          </div>
+
+          <div>策略</div>
+          <div class="v"><code>${state.client_strategy}</code></div>
+
+          <div>账号池</div>
+          <div class="v">${state.accounts_enabled}/${state.accounts_total} · oauth ${state.oauth_accounts}</div>
+
+          <div>提示</div>
+          <div class="v">这个 Key 是本地网关用的，不是 iFlow/OpenAI Key。把它填进 OpenCode 的 provider=iflow 即可。</div>
         `;
+        bindCopyButtons();
+
+        const btn = document.getElementById("btnRevealKey");
+        const code = document.getElementById("clientKeyCode");
+        if (btn && code) {
+          btn.onclick = () => {
+            const full = code.getAttribute("data-full") || "";
+            const shown = code.textContent || "";
+            const isMasked = shown.includes("*");
+            code.textContent = isMasked ? full : (apiKeyMask || shown);
+            btn.textContent = isMasked ? "隐藏" : "显示";
+          };
+        }
       }
 
       function renderAccounts(state) {
@@ -326,26 +554,36 @@ UI_HTML = """<!doctype html>
             opt.textContent = `${p.name} (${p.directory})`;
             edgeProfile.appendChild(opt);
           }
+          toast("Profiles 已刷新", "good");
         } catch (e) {
           log(`读取 Edge Profiles 失败: ${e}`);
+          toast("Profiles 刷新失败", "bad");
         }
       }
 
       async function refresh() {
         try {
           const state = await jget("/ui/api/state");
-          statusPill.textContent = state.iflow_logged_in ? "已就绪" : "未登录/未配置";
-          statusPill.style.color = state.iflow_logged_in ? "#2ecc71" : "#f39c12";
+          statusPill.classList.remove("good", "bad");
+          if (state.iflow_logged_in) {
+            statusPill.classList.add("good");
+            statusText.textContent = "已就绪";
+          } else {
+            statusText.textContent = "未登录 / 未配置";
+          }
           renderKV(state);
           renderAccounts(state);
         } catch (e) {
-          statusPill.textContent = "加载失败";
-          statusPill.style.color = "#e74c3c";
+          statusPill.classList.remove("good");
+          statusPill.classList.add("bad");
+          statusText.textContent = "加载失败";
           log(`刷新失败: ${e}`);
+          toast("刷新失败", "bad");
         }
       }
 
       document.getElementById("btnRefresh").onclick = refresh;
+      document.getElementById("btnProfiles").onclick = refreshProfiles;
       document.getElementById("btnAdd").onclick = async () => {
         const profileDirectory = edgeProfile.value || null;
         const maxConcurrency = Number(document.getElementById("maxConcurrency").value || 0);
@@ -354,8 +592,10 @@ UI_HTML = """<!doctype html>
           const r = await jpost("/ui/api/oauth/start", { profile_directory: profileDirectory, max_concurrency: maxConcurrency, label: labelOverride, inprivate: false, open_browser: true });
           log(r.opened ? "已打开 Edge 登录窗口" : "未能自动打开 Edge，请复制链接手动打开");
           log(`授权链接: ${r.auth_url}`);
+          toast("已发起 OAuth 登录", "good");
         } catch (e) {
           log(`启动 OAuth 失败: ${e}`);
+          toast("启动 OAuth 失败", "bad");
         }
       };
       document.getElementById("btnAddInPrivate").onclick = async () => {
@@ -365,8 +605,10 @@ UI_HTML = """<!doctype html>
           const r = await jpost("/ui/api/oauth/start", { profile_directory: null, max_concurrency: maxConcurrency, label: labelOverride, inprivate: true, open_browser: true });
           log(r.opened ? "已打开 Edge InPrivate 登录窗口" : "未能自动打开 Edge，请复制链接手动打开");
           log(`授权链接: ${r.auth_url}`);
+          toast("已发起 InPrivate 登录", "good");
         } catch (e) {
           log(`启动 OAuth 失败: ${e}`);
+          toast("启动 OAuth 失败", "bad");
         }
       };
 
@@ -398,7 +640,7 @@ class AccountUpdateRequest(BaseModel):
 @router.get("/ui", response_class=HTMLResponse)
 async def ui_index(request: Request):
     _require_ui_allowed(request)
-    return HTMLResponse(UI_HTML)
+    return HTMLResponse(UI_HTML, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/ui/api/edge/profiles")
@@ -542,14 +784,23 @@ async def ui_oauth_callback(request: Request):
     state = (request.query_params.get("state") or "").strip()
 
     if error:
-        return HTMLResponse(f"<h3>登录失败</h3><pre>{error}</pre>")
+        return HTMLResponse(
+            f"<h3>登录失败</h3><pre>{error}</pre>",
+            headers={"Cache-Control": "no-store"},
+        )
     if not state or not code:
-        return HTMLResponse("<h3>登录失败</h3><pre>missing code/state</pre>")
+        return HTMLResponse(
+            "<h3>登录失败</h3><pre>missing code/state</pre>",
+            headers={"Cache-Control": "no-store"},
+        )
 
     with _LOCK:
         pending = _PENDING.pop(state, None)
     if not pending:
-        return HTMLResponse("<h3>登录失败</h3><pre>invalid/expired state</pre>")
+        return HTMLResponse(
+            "<h3>登录失败</h3><pre>invalid/expired state</pre>",
+            headers={"Cache-Control": "no-store"},
+        )
 
     # Exchange code -> tokens -> user info -> apiKey
     oauth = IFlowOAuth()
@@ -607,7 +858,8 @@ async def ui_oauth_callback(request: Request):
   </div>
   <script>setTimeout(()=>{try{window.close()}catch(e){}}, 5000);</script>
 </body></html>
-"""
+""",
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -661,4 +913,3 @@ async def ui_account_delete(request: Request, account_id: str):
     ensure_opencode_route(cfg, token=client_api_key, strategy=client_strategy)
     save_keys_config(cfg)
     return {"ok": True}
-

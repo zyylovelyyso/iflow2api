@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from .model_catalog import get_known_models, to_opencode_models
+from .model_catalog import get_recommended_models, to_opencode_models
 
 
 def _safe_read_json(path: Path) -> dict[str, Any]:
@@ -78,7 +78,7 @@ def ensure_iflow_provider(
 
     provider[provider_name] = {
         "api": "openai",
-        "models": to_opencode_models(get_known_models()),
+        "models": to_opencode_models(get_recommended_models()),
         "options": {
             "baseURL": base_url,
             "apiKey": api_key,

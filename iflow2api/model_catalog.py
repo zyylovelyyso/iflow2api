@@ -49,6 +49,28 @@ def get_known_models() -> list[ModelSpec]:
     ]
 
 
+def get_recommended_models() -> list[ModelSpec]:
+    """
+    A minimal "latest only" set intended for quick client configs (e.g. OpenCode).
+
+    This keeps the UX clean while still covering the common use-cases:
+    - general: GLM-4.7
+    - small/fast: MiniMax-M2.1
+    - coding: Qwen3-Coder-Plus
+    - alt/general: DeepSeek-V3.2
+    - Moonshot: Kimi-K2-0905
+    - iFlow: ROME 30B
+    """
+    return [
+        ModelSpec(id="glm-4.7", name="GLM-4.7", description="Zhipu GLM-4.7"),
+        ModelSpec(id="minimax-m2.1", name="MiniMax-M2.1", description="MiniMax M2.1"),
+        ModelSpec(id="iflow-rome-30ba3b", name="iFlow-ROME-30BA3B", description="iFlow ROME 30B (fast)"),
+        ModelSpec(id="deepseek-v3.2", name="DeepSeek-V3.2", description="DeepSeek V3.2"),
+        ModelSpec(id="qwen3-coder-plus", name="Qwen3-Coder-Plus", description="Qwen3 coder model"),
+        ModelSpec(id="kimi-k2-0905", name="Kimi-K2-0905", description="Moonshot Kimi K2 0905"),
+    ]
+
+
 def to_openai_models_list(models: Iterable[ModelSpec], *, owned_by: str = "iflow", created: int) -> dict[str, Any]:
     return {
         "object": "list",

@@ -111,7 +111,7 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="http://localhost:8000/v1",
-    api_key="not-needed"  # 默认从 ~/.iflow/settings.json 自动读取上游 iFlow apiKey
+    api_key="sk-your-local-key"  # 从 http://localhost:8000/ui 复制 Client API Key
 )
 
 # 非流式请求
@@ -136,10 +136,12 @@ for chunk in stream:
 
 ```bash
 # 获取模型列表
-curl http://localhost:8000/v1/models
+curl http://localhost:8000/v1/models \
+  -H "Authorization: Bearer sk-your-local-key"
 
 # 非流式请求
 curl http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer sk-your-local-key" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "glm-4.7",
@@ -148,6 +150,7 @@ curl http://localhost:8000/v1/chat/completions \
 
 # 流式请求
 curl http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer sk-your-local-key" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "glm-4.7",

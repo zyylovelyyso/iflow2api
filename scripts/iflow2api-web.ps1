@@ -38,11 +38,10 @@ if (Test-Health $healthUrl) {
   exit 0
 }
 
-# Prefer venv pythonw to avoid a console window.
-$pythonw = Join-Path $RepoRoot ".venv\\Scripts\\pythonw.exe"
-if (!(Test-Path $pythonw)) {
-  $pythonw = Join-Path $RepoRoot ".venv\\Scripts\\python.exe"
-}
+# Prefer the venv console entrypoint (more reliable than pythonw for uvicorn).
+$iflow2apiExe = Join-Path $RepoRoot ".venv\\Scripts\\iflow2api.exe"
+$pythonExe = Join-Path $RepoRoot ".venv\\Scripts\\python.exe"
+$pythonwExe = Join-Path $RepoRoot ".venv\\Scripts\\pythonw.exe"
 
 $logDir = Join-Path $env:USERPROFILE ".iflow2api\\logs"
 Ensure-Dir $logDir
@@ -50,13 +49,31 @@ $stdout = Join-Path $logDir "iflow2api-web.out.log"
 $stderr = Join-Path $logDir "iflow2api-web.err.log"
 
 try {
-  Start-Process `
-    -FilePath $pythonw `
-    -WorkingDirectory $RepoRoot `
-    -ArgumentList @("-m", "iflow2api") `
-    -WindowStyle Hidden `
-    -RedirectStandardOutput $stdout `
-    -RedirectStandardError $stderr | Out-Null
+  if (Test-Path $iflow2apiExe) {
+    Start-Process `
+      -FilePath $iflow2apiExe `
+      -WorkingDirectory $RepoRoot `
+      -WindowStyle Hidden `
+      -RedirectStandardOutput $stdout `
+      -RedirectStandardError $stderr | Out-Null
+  } elseif (Test-Path $pythonExe) {
+    # Explicit uvicorn launch so host/port are guaranteed.
+    Start-Process `
+      -FilePath $pythonExe `
+      -WorkingDirectory $RepoRoot `
+      -ArgumentList @("-m", "uvicorn", "iflow2api.app:app", "--host", "127.0.0.1", "--port", "$port", "--log-level", "warning") `
+      -WindowStyle Hidden `
+      -RedirectStandardOutput $stdout `
+      -RedirectStandardError $stderr | Out-Null
+  } elseif (Test-Path $pythonwExe) {
+    Start-Process `
+      -FilePath $pythonwExe `
+      -WorkingDirectory $RepoRoot `
+      -ArgumentList @("-m", "iflow2api") `
+      -WindowStyle Hidden | Out-Null
+  } else {
+    throw "No usable Python/iflow2api executable found"
+  }
 } catch {}
 
 # Wait for startup (max ~15s)
@@ -75,7 +92,7 @@ if ($ok) {
 try {
   Add-Type -AssemblyName PresentationFramework | Out-Null
   [System.Windows.MessageBox]::Show(
-    "iflow2api 启动失败。可能端口 $port 被占用，或环境/依赖损坏。`n`n错误日志：$stderr",
+    "iflow2api failed to start. Port $port may be in use, or the environment is broken.`n`nError log: $stderr",
     "iflow2api",
     "OK",
     "Error"
@@ -83,4 +100,4 @@ try {
 } catch {}
 
 try { Start-Process $stderr | Out-Null } catch {}
-
+try { Start-Process $stdout | Out-Null } catch {}

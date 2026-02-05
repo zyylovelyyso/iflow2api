@@ -26,7 +26,7 @@ from .keys_store import (
 )
 from .routing import KeyRoutingConfig
 from .opencode import discover_config_paths, ensure_iflow_provider
-from .model_catalog import get_known_models
+from .model_catalog import get_recommended_models
 
 
 class IFlow2ApiApp:
@@ -496,7 +496,7 @@ class IFlow2ApiApp:
             value=self.settings.opencode_set_default_model,
         )
 
-        model_ids = [m.id for m in get_known_models()]
+        model_ids = [m.id for m in get_recommended_models()]
         self.opencode_default_model_dropdown = ft.Dropdown(
             label="默认模型",
             options=[ft.dropdown.Option(mid) for mid in model_ids],
