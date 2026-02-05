@@ -20,6 +20,7 @@
 | `glm-4.7` | GLM-4.7 | 智谱 GLM-4.7 |
 | `minimax-m2.1` | MiniMax-M2.1 | MiniMax M2.1 |
 | `iflow-rome-30ba3b` | iFlow-ROME-30BA3B | iFlow ROME 30B |
+| `deepseek-r1` | DeepSeek-R1 | DeepSeek 推理（思考）模型 |
 | `deepseek-v3.2` | DeepSeek-V3.2 | DeepSeek V3.2 |
 | `qwen3-coder-plus` | Qwen3-Coder-Plus | 通义千问 Qwen3 Coder Plus |
 | `kimi-k2-0905` | Kimi-K2-0905 | Moonshot Kimi K2 0905 |
@@ -131,6 +132,8 @@ for chunk in stream:
     if chunk.choices[0].delta.content:
         print(chunk.choices[0].delta.content, end="")
 ```
+
+> 思考（Reasoning）默认开启：对 `glm-*`、`deepseek-r1`、以及模型名包含 `thinking` 的模型，iflow2api 会在请求中默认补上 `enable_thinking=true`（除非你显式传了 `enable_thinking` / `thinking` / `reasoning` 等字段）。如果想关掉，在请求 JSON 里加 `"enable_thinking": false`。
 
 ### curl
 

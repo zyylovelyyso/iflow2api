@@ -30,8 +30,7 @@ def get_known_models() -> list[ModelSpec]:
         ModelSpec(id="deepseek-r1", name="DeepSeek-R1", description="DeepSeek reasoning model"),
         ModelSpec(id="deepseek-v3", name="DeepSeek-V3-671B", description="DeepSeek V3 671B"),
         ModelSpec(id="deepseek-v3.1", name="DeepSeek-V3.1", description="DeepSeek V3.1"),
-        ModelSpec(id="deepseek-v3.2", name="DeepSeek-V3.2-Exp", description="DeepSeek V3.2 experimental"),
-        ModelSpec(id="deepseek-v3.2-chat", name="DeepSeek-V3.2", description="DeepSeek V3.2 chat"),
+        ModelSpec(id="deepseek-v3.2", name="DeepSeek-V3.2", description="DeepSeek V3.2"),
         ModelSpec(id="qwen3-coder-plus", name="Qwen3-Coder-Plus", description="Qwen3 coder model"),
         ModelSpec(id="qwen3-max", name="Qwen3-Max", description="Qwen3 flagship"),
         ModelSpec(id="qwen3-max-preview", name="Qwen3-Max-Preview", description="Qwen3 Max preview"),
@@ -66,6 +65,7 @@ def get_recommended_models() -> list[ModelSpec]:
         ModelSpec(id="minimax-m2.1", name="MiniMax-M2.1", description="MiniMax M2.1"),
         ModelSpec(id="iflow-rome-30ba3b", name="iFlow-ROME-30BA3B", description="iFlow ROME 30B (fast)"),
         ModelSpec(id="deepseek-v3.2", name="DeepSeek-V3.2", description="DeepSeek V3.2"),
+        ModelSpec(id="deepseek-r1", name="DeepSeek-R1", description="DeepSeek reasoning model"),
         ModelSpec(id="qwen3-coder-plus", name="Qwen3-Coder-Plus", description="Qwen3 coder model"),
         ModelSpec(id="kimi-k2-0905", name="Kimi-K2-0905", description="Moonshot Kimi K2 0905"),
     ]

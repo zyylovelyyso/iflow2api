@@ -23,6 +23,53 @@ from .routing import (
     load_routing_config,
 )
 from .keys_store import save_keys_config
+ 
+_THINKING_REQUEST_KEYS = (
+    "enable_thinking",
+    "thinking",
+    "reasoning",
+    "thinking_level",
+    "thinkingLevel",
+)
+
+
+def _is_thinking_model_id(model: str) -> bool:
+    """
+    Best-effort detection of models that support "thinking"/reasoning output.
+
+    iFlow's upstreams are heterogeneous; for safety we:
+    - only auto-enable when the model id strongly implies reasoning
+    - never override an explicit client preference
+    """
+    low = (model or "").strip().lower()
+    if not low:
+        return False
+    if low.startswith("glm-"):
+        return True
+    if low == "deepseek-r1":
+        return True
+    if "thinking" in low:
+        return True
+    return False
+
+
+def _apply_default_thinking(body: dict) -> None:
+    """
+    Default-enable thinking for reasoning-capable models.
+
+    Clients like OpenCode may not expose a UI toggle for custom fields; this
+    keeps "thinking models" in thinking mode by default while allowing users to
+    override by explicitly sending any of `_THINKING_REQUEST_KEYS`.
+    """
+    if not isinstance(body, dict):
+        return
+    model = body.get("model")
+    if not isinstance(model, str) or (not _is_thinking_model_id(model)):
+        return
+    if any(k in body for k in _THINKING_REQUEST_KEYS):
+        return
+    body["enable_thinking"] = True
+
 
 def _normalize_model_id(model: Any) -> Any:
     """
@@ -396,6 +443,10 @@ class ProxyManager:
         # Normalize model id for better compatibility with different clients/docs.
         try:
             body["model"] = _normalize_model_id(body.get("model"))
+        except Exception:
+            pass
+        try:
+            _apply_default_thinking(body)
         except Exception:
             pass
 
