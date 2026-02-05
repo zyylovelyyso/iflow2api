@@ -83,6 +83,8 @@ iflow2api
 
 服务默认运行在 `http://localhost:8000`
 
+Web 控制台（推荐）：`http://localhost:8000/ui`
+
 ### 自定义端口
 
 ```bash
@@ -96,6 +98,7 @@ python -c "import uvicorn; from iflow2api.app import app; uvicorn.run(app, host=
 | `/health` | GET | 健康检查 |
 | `/v1/models` | GET | 获取可用模型列表 |
 | `/v1/chat/completions` | POST | Chat Completions API |
+| `/ui` | GET | 本地 Web 控制台（账号池管理 / OAuth 登录） |
 | `/models` | GET | 兼容端点 (不带 /v1 前缀) |
 | `/chat/completions` | POST | 兼容端点 (不带 /v1 前缀) |
 
@@ -177,12 +180,13 @@ curl http://localhost:8000/v1/chat/completions \
 
 ### OAuth 多账号（推荐：可自动续期）
 
-如果你用的是 iFlow 的 **浏览器登录（OAuth）**，建议用本项目的 GUI 添加账号：
+如果你用的是 iFlow 的 **浏览器登录（OAuth）**，推荐用本项目的 **Web 控制台** 添加账号：
 
 1. 在 Edge 里创建多个 Profile（每个 Profile 登录一个 iFlow 账号）
-2. 打开 `iflow2api` GUI → “账号池模式” → 选择 `Edge Profile` → 点击“添加账号（Edge Profile 登录）”
-3. 登录成功后会写入 `keys.json`，并保存 `oauth_refresh_token / oauth_expires_at`（不会在日志里打印明文）
-4. 服务启动后会后台自动刷新 OAuth token，并在遇到上游 `439 Token expired` 时自动刷新后重试
+2. 启动服务后打开 `http://localhost:8000/ui`
+3. 选择 `Edge Profile` → 点击“添加账号（Edge Profile OAuth）”
+4. 登录成功后会写入 `keys.json`，并保存 `oauth_refresh_token / oauth_expires_at`（不会在日志里打印明文）
+5. 服务启动后会后台自动刷新 OAuth token，并在遇到上游 `439 Token expired` 时自动刷新后重试
 
 示例 `keys.json`：
 

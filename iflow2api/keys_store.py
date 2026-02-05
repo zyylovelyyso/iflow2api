@@ -10,7 +10,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from .routing import ApiKeyRoute, IFlowUpstreamAccount, KeyRoutingConfig, get_keys_config_path, load_routing_config
+from .routing import (
+    ApiKeyRoute,
+    IFlowUpstreamAccount,
+    KeyRoutingConfig,
+    get_keys_config_path,
+    get_routing_file_path_in_use,
+    load_routing_config,
+)
 
 
 def _now_iso() -> str:
@@ -24,7 +31,10 @@ def load_keys_config() -> KeyRoutingConfig:
 
 def save_keys_config(cfg: KeyRoutingConfig, path: Optional[Path] = None) -> Path:
     if path is None:
-        path = get_keys_config_path()
+        # Respect env overrides (IFLOW2API_KEYS_PATH). If config is provided via
+        # IFLOW2API_KEYS_JSON, there's no file to write to; callers should pass
+        # an explicit path or handle None upstream.
+        path = get_routing_file_path_in_use() or get_keys_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     # Use JSON mode to safely serialize datetime fields (oauth_expires_at, etc.).
     data = cfg.model_dump(mode="json")

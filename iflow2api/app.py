@@ -13,6 +13,7 @@ from .config import load_iflow_config, check_iflow_login, IFlowConfig
 from .proxy_manager import ProxyManager
 from .routing import load_routing_config
 from .routing_refresher import start_global_routing_refresher, stop_global_routing_refresher
+from .web_ui import router as web_ui_router
 
 
 # 全局代理管理器
@@ -51,12 +52,12 @@ async def lifespan(app: FastAPI):
             if config.model_name:
                 print(f"[iflow2api] 默认模型: {config.model_name}")
     except FileNotFoundError as e:
+        # Allow the server to start so the user can login via Web UI.
         print(f"[错误] {e}", file=sys.stderr)
-        print("[提示] 未检测到多账号配置时，需要先运行 'iflow' 命令并完成登录", file=sys.stderr)
-        sys.exit(1)
+        print("[提示] 当前未检测到有效登录。你仍可打开 /ui 完成 OAuth 登录并创建账号池。", file=sys.stderr)
     except ValueError as e:
         print(f"[错误] {e}", file=sys.stderr)
-        sys.exit(1)
+        print("[提示] 配置错误。你仍可打开 /ui 检查/修复账号池配置。", file=sys.stderr)
 
     yield
 
@@ -75,6 +76,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Local web console
+app.include_router(web_ui_router)
 
 # 添加 CORS 中间件
 app.add_middleware(
@@ -122,6 +126,7 @@ async def root():
             "models": "/v1/models",
             "chat_completions": "/v1/chat/completions",
             "health": "/health",
+            "ui": "/ui",
         },
     }
 
@@ -239,28 +244,28 @@ async def list_models_compat():
 def main():
     """主入口"""
     import uvicorn
+    from .settings import load_settings
 
     # 检查是否已登录
     try:
         manager = get_proxy_manager()
         if not manager.routing.accounts and not check_iflow_login():
-            print("[错误] iFlow 未登录", file=sys.stderr)
-            print("[提示] 请先运行 'iflow' 命令并完成登录，或配置 ~/.iflow2api/keys.json", file=sys.stderr)
-            sys.exit(1)
+            print("[提示] 当前未检测到有效登录。你仍可启动服务并打开 /ui 完成 OAuth 登录。", file=sys.stderr)
     except Exception as e:
-        print(f"[错误] {e}", file=sys.stderr)
-        sys.exit(1)
+        print(f"[警告] {e}", file=sys.stderr)
 
     print("=" * 50)
     print("  iflow2api - iFlow CLI AI 服务代理")
     print("=" * 50)
     print()
 
+    settings = load_settings()
+
     # 启动服务 - 直接传入 app 对象而非字符串，避免打包后导入失败
     uvicorn.run(
         app,
-        host="0.0.0.0",
-        port=8000,
+        host=settings.host or "0.0.0.0",
+        port=int(settings.port or 8000),
         reload=False,
     )
 
