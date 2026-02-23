@@ -37,6 +37,8 @@ class IFlowUpstreamAccount(BaseModel):
     oauth_refresh_token: Optional[str] = Field(default=None, description="OAuth refresh token")
     oauth_expires_at: Optional[datetime] = Field(default=None, description="OAuth expiry time")
     last_refresh_at: Optional[datetime] = Field(default=None, description="Last refresh time")
+    refresh_failures: int = Field(default=0, ge=0, description="Consecutive refresh failures")
+    last_refresh_error: Optional[str] = Field(default=None, description="Last refresh error summary")
 
 
 class ApiKeyRoute(BaseModel):

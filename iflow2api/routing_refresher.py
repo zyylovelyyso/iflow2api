@@ -21,13 +21,16 @@ from .keys_store import save_keys_config
 from .oauth import IFlowOAuth
 from .routing import get_routing_file_path_in_use, load_routing_config
 
+DEFAULT_REFRESH_CHECK_INTERVAL_SECONDS = 600
+DEFAULT_REFRESH_BUFFER_SECONDS = 14400
+
 
 class RoutingOAuthRefresher:
     def __init__(
         self,
         *,
-        check_interval_seconds: int = 900,
-        refresh_buffer_seconds: int = 300,
+        check_interval_seconds: int = DEFAULT_REFRESH_CHECK_INTERVAL_SECONDS,
+        refresh_buffer_seconds: int = DEFAULT_REFRESH_BUFFER_SECONDS,
         log: Optional[Callable[[str], None]] = None,
     ):
         self.check_interval_seconds = int(check_interval_seconds)
@@ -73,7 +76,12 @@ class RoutingOAuthRefresher:
         if not path.exists():
             return
 
-        cfg = load_routing_config()
+        try:
+            cfg = load_routing_config()
+        except Exception as ex:
+            if self._log:
+                self._log(f"[refresh] skip invalid routing config ({type(ex).__name__})")
+            return
         if not cfg.accounts:
             return
 
@@ -116,11 +124,17 @@ class RoutingOAuthRefresher:
                     if token_data.get("expires_at"):
                         acc.oauth_expires_at = token_data["expires_at"]
                     acc.last_refresh_at = datetime.now(timezone.utc)
+                    acc.refresh_failures = 0
+                    acc.last_refresh_error = None
                     changed = True
 
                     if self._log:
                         self._log(f"[refresh] {label}: ok")
                 except Exception as ex:
+                    acc.refresh_failures = int(getattr(acc, "refresh_failures", 0) or 0) + 1
+                    err = f"{type(ex).__name__}: {ex}"
+                    acc.last_refresh_error = err[:180]
+                    changed = True
                     if self._log:
                         self._log(f"[refresh] {label}: failed ({type(ex).__name__})")
 
@@ -147,4 +161,3 @@ def stop_global_routing_refresher() -> None:
     if _global_refresher:
         _global_refresher.stop()
         _global_refresher = None
-

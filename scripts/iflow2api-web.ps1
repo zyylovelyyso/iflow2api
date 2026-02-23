@@ -19,9 +19,14 @@ function Get-Iflow2ApiPort {
 function Test-Health([string]$healthUrl) {
   try {
     $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 1 $healthUrl
-    return ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500)
+    return ($r.StatusCode -ge 200 -and $r.StatusCode -lt 600)
   } catch {
-    return $false
+    try {
+      $status = [int]$_.Exception.Response.StatusCode
+      return ($status -ge 200 -and $status -lt 600)
+    } catch {
+      return $false
+    }
   }
 }
 
@@ -29,13 +34,51 @@ function Ensure-Dir([string]$path) {
   try { New-Item -ItemType Directory -Force -Path $path | Out-Null } catch {}
 }
 
+function Get-ListenerProcess([int]$port) {
+  try {
+    $conn = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction Stop | Select-Object -First 1
+    if (-not $conn) { return $null }
+    return Get-CimInstance Win32_Process -Filter "ProcessId=$($conn.OwningProcess)"
+  } catch {
+    return $null
+  }
+}
+
+function Is-RepoServerProcess($proc, [string]$repoRoot) {
+  if (-not $proc) { return $false }
+  $cmd = "$($proc.CommandLine)".ToLowerInvariant()
+  if (-not $cmd) { return $false }
+
+  try {
+    $repo = (Resolve-Path $repoRoot).Path.ToLowerInvariant()
+  } catch {
+    $repo = "$repoRoot".ToLowerInvariant()
+  }
+
+  $repo = $repo.Replace("/", "\\")
+  $repoIf2aExe = (Join-Path $repo ".venv\\scripts\\iflow2api.exe").ToLowerInvariant()
+  $repoPythonExe = (Join-Path $repo ".venv\\scripts\\python.exe").ToLowerInvariant()
+
+  return ($cmd.Contains($repo) -or $cmd.Contains($repoIf2aExe) -or $cmd.Contains($repoPythonExe))
+}
+
 $port = Get-Iflow2ApiPort
 $uiUrl = "http://127.0.0.1:$port/ui"
 $healthUrl = "http://127.0.0.1:$port/health"
 
-if (Test-Health $healthUrl) {
-  Start-Process $uiUrl | Out-Null
-  exit 0
+$listener = Get-ListenerProcess $port
+if ($listener -and (Test-Health $healthUrl)) {
+  if (Is-RepoServerProcess $listener $RepoRoot) {
+    Start-Process $uiUrl | Out-Null
+    exit 0
+  }
+
+  # A different iflow2api instance is occupying the port (commonly global Python).
+  # Stop it so desktop shortcut always uses this repo's environment.
+  try {
+    Stop-Process -Id $listener.ProcessId -Force
+    Start-Sleep -Milliseconds 500
+  } catch {}
 }
 
 # Prefer the venv console entrypoint (more reliable than pythonw for uvicorn).

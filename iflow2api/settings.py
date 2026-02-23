@@ -37,9 +37,9 @@ class AppSettings(BaseModel):
     opencode_config_path: str = ""  # 自动探测失败时可手动指定
     opencode_provider_name: str = "iflow"
     opencode_set_default_model: bool = True
-    opencode_default_model: str = "glm-4.7"
+    opencode_default_model: str = "glm-5"
     opencode_set_small_model: bool = True
-    opencode_small_model: str = "minimax-m2.1"
+    opencode_small_model: str = "minimax-m2.5"
     client_api_key: str = ""  # 来访方（OpenCode）调用本地 iflow2api 的 token（非上游 iFlow key）
     client_strategy: str = "least_busy"  # least_busy / round_robin
 

@@ -32,6 +32,14 @@ _THINKING_REQUEST_KEYS = (
     "thinkingLevel",
 )
 
+_MODEL_COMPAT_CANDIDATES: dict[str, tuple[str, ...]] = {
+    # Prefer target model; fall back to closest generally available upstream model.
+    "glm-5": ("glm-5", "glm-4.6"),
+    "minimax-m2.5": ("minimax-m2.5", "qwen3-max", "qwen3-max-preview", "deepseek-v3.2"),
+    "kimi-k2.5": ("kimi-k2.5", "kimi-k2-0905", "kimi-k2"),
+}
+_ENABLE_MODEL_COMPAT_FALLBACK = False
+
 
 def _is_thinking_model_id(model: str) -> bool:
     """
@@ -44,6 +52,8 @@ def _is_thinking_model_id(model: str) -> bool:
     low = (model or "").strip().lower()
     if not low:
         return False
+    if low in ("glm-5", "minimax-m2.5", "kimi-k2.5"):
+        return True
     if low.startswith("glm-"):
         return True
     if low == "deepseek-r1":
@@ -51,6 +61,23 @@ def _is_thinking_model_id(model: str) -> bool:
     if "thinking" in low:
         return True
     return False
+
+
+def _is_model_not_supported_error(exc: Exception) -> bool:
+    status = get_http_status_code(exc)
+    if status is None:
+        return False
+    if status not in (400, 404, 435):
+        return False
+    resp = getattr(exc, "response", None)
+    if resp is None:
+        return False
+    try:
+        data = resp.json()
+    except Exception:
+        data = {}
+    msg = str((data or {}).get("msg") or (data or {}).get("message") or exc).lower()
+    return ("model" in msg) and ("not support" in msg or "unsupported" in msg)
 
 
 def _apply_default_thinking(body: dict) -> None:
@@ -156,6 +183,7 @@ class ProxyManager:
         self._rr_index: dict[str, int] = {}
         self._account_state: dict[str, _AccountState] = {}
         self._refresh_locks: dict[str, asyncio.Lock] = {}
+        self._account_models_cache: dict[str, tuple[float, set[str]]] = {}
         self._routing_path = get_routing_file_path_in_use()
         self._routing_mtime: float = 0.0
         if self._routing_path and self._routing_path.exists():
@@ -204,6 +232,7 @@ class ProxyManager:
             self._proxies.clear()
             self._rr_index.clear()
             self._account_state.clear()
+            self._account_models_cache.clear()
             self._routing = new_cfg
             self._routing_mtime = mtime
 
@@ -348,6 +377,42 @@ class ProxyManager:
                 self._proxies[account_id] = proxy
             return proxy
 
+    async def _get_account_model_ids(self, account_id: str) -> set[str]:
+        cached = self._account_models_cache.get(account_id)
+        now = time.time()
+        if cached and (now - cached[0] <= 300):
+            return cached[1]
+
+        ids: set[str] = set()
+        try:
+            proxy = await self._get_or_create_account_proxy(account_id)
+            data = await proxy.get_models()
+            for item in data.get("data", []) if isinstance(data, dict) else []:
+                if isinstance(item, dict):
+                    mid = item.get("id")
+                    if isinstance(mid, str) and mid:
+                        ids.add(mid.strip())
+        except Exception:
+            ids = set()
+
+        self._account_models_cache[account_id] = (now, ids)
+        return ids
+
+    async def _resolve_model_for_account(self, account_id: str, requested_model: Any) -> Any:
+        if not isinstance(requested_model, str):
+            return requested_model
+        low = requested_model.strip().lower()
+        candidates = _MODEL_COMPAT_CANDIDATES.get(low)
+        if not candidates:
+            return requested_model
+        available = await self._get_account_model_ids(account_id)
+        if not available:
+            return requested_model
+        for candidate in candidates:
+            if candidate in available:
+                return candidate
+        return requested_model
+
     async def _pick_account(self, candidates: list[str], strategy: str, exclude: set[str]) -> str:
         # Prefer healthy accounts.
         if self._routing.resilience.enabled:
@@ -379,7 +444,8 @@ class ProxyManager:
         """
         Best-effort refresh for a specific upstream account.
 
-        Returns True when refreshed and persisted.
+        Returns True when refreshed and persisted; returns False on all failures
+        (never raises), so upstream request flow can continue to handle fallback.
         """
         lock = self._refresh_locks.get(account_id)
         if lock is None:
@@ -393,13 +459,17 @@ class ProxyManager:
                 return False
 
             oauth = IFlowOAuth()
+            changed = False
+            refreshed = False
+            new_api_key: Optional[str] = None
+
             try:
                 token_data = await oauth.refresh_token(acc.oauth_refresh_token)
                 access_token = token_data.get("access_token") or ""
                 user_info = await oauth.get_user_info(access_token)
                 api_key = user_info.get("apiKey") or user_info.get("searchApiKey")
                 if not api_key:
-                    return False
+                    raise ValueError("missing apiKey from user info")
 
                 acc.api_key = api_key
                 acc.auth_type = acc.auth_type or "oauth-iflow"
@@ -409,21 +479,38 @@ class ProxyManager:
                 if token_data.get("expires_at"):
                     acc.oauth_expires_at = token_data["expires_at"]
                 acc.last_refresh_at = datetime.now(timezone.utc)
+                acc.refresh_failures = 0
+                acc.last_refresh_error = None
 
-                if self._routing_path:
+                changed = True
+                refreshed = True
+                new_api_key = api_key
+            except Exception as ex:
+                acc.refresh_failures = int(getattr(acc, "refresh_failures", 0) or 0) + 1
+                err = f"{type(ex).__name__}: {ex}"
+                acc.last_refresh_error = err[:180]
+                changed = True
+                refreshed = False
+            finally:
+                await oauth.close()
+
+            if changed and self._routing_path:
+                try:
                     save_keys_config(self._routing, self._routing_path)
                     try:
                         self._routing_mtime = self._routing_path.stat().st_mtime
                     except Exception:
                         pass
+                except Exception:
+                    pass
 
+            if refreshed and new_api_key:
                 proxy = self._proxies.get(account_id)
                 if proxy:
-                    proxy.config.api_key = api_key
+                    proxy.config.api_key = new_api_key
+                self._account_models_cache.pop(account_id, None)
 
-                return True
-            finally:
-                await oauth.close()
+            return refreshed
 
     async def chat_completions(
         self,
@@ -491,6 +578,10 @@ class ProxyManager:
         # For streaming, only retry before the first byte; cap to 1 extra attempt.
         if stream and self._routing.resilience.enabled:
             attempts = min(len(candidates), 1 + min(1, max_extra))
+        # Always allow trying each account at least once for model-compatibility fallback.
+        attempts = max(1, min(len(candidates), attempts if attempts > 0 else 1))
+        if len(candidates) > attempts:
+            attempts = len(candidates)
         backoff_ms = int(self._routing.resilience.retry_backoff_ms) if self._routing.resilience.enabled else 0
         tried: set[str] = set()
         last_exc: Optional[Exception] = None
@@ -499,22 +590,31 @@ class ProxyManager:
             account_id = await self._pick_account(candidates, route.strategy, tried)
             tried.add(account_id)
             proxy = await self._get_or_create_account_proxy(account_id)
+            attempt_body = body
+            if _ENABLE_MODEL_COMPAT_FALLBACK:
+                try:
+                    attempt_body = dict(body)
+                    attempt_body["model"] = await self._resolve_model_for_account(
+                        account_id, attempt_body.get("model")
+                    )
+                except Exception:
+                    attempt_body = body
 
             try:
                 if not stream:
                     try:
-                        result = await proxy.chat_completions(body, stream=False)
+                        result = await proxy.chat_completions(attempt_body, stream=False)
                     except Exception as ex:
                         if _is_upstream_token_expired(ex) and await self._refresh_account_oauth(account_id):
                             proxy = await self._get_or_create_account_proxy(account_id)
-                            result = await proxy.chat_completions(body, stream=False)
+                            result = await proxy.chat_completions(attempt_body, stream=False)
                         else:
                             raise
                     self._record_success(account_id)
                     return result
 
                 # stream: validate by pulling first chunk
-                stream_iter = await proxy.chat_completions(body, stream=True)
+                stream_iter = await proxy.chat_completions(attempt_body, stream=True)
                 try:
                     first = await stream_iter.__anext__()
                 except StopAsyncIteration:
@@ -526,7 +626,7 @@ class ProxyManager:
                 except Exception as ex:
                     if _is_upstream_token_expired(ex) and await self._refresh_account_oauth(account_id):
                         proxy = await self._get_or_create_account_proxy(account_id)
-                        stream_iter = await proxy.chat_completions(body, stream=True)
+                        stream_iter = await proxy.chat_completions(attempt_body, stream=True)
                         first = await stream_iter.__anext__()
                     else:
                         raise
@@ -546,17 +646,21 @@ class ProxyManager:
             except Exception as e:
                 self._record_failure(account_id, e)
                 last_exc = e
-                if not self._routing.resilience.enabled:
+                model_not_supported = _is_model_not_supported_error(e)
+                retryable = model_not_supported or is_retryable_exception(
+                    e, self._routing.resilience.retry_status_codes
+                )
+                if not self._routing.resilience.enabled and not model_not_supported:
                     break
                 if stream:
-                    if not is_retryable_exception(e, self._routing.resilience.retry_status_codes):
+                    if not retryable:
                         break
                     if len(tried) >= len(candidates):
                         break
                     if backoff_ms and i < attempts - 1:
                         await asyncio.sleep(backoff_ms / 1000.0)
                     continue
-                if not is_retryable_exception(e, self._routing.resilience.retry_status_codes):
+                if not retryable:
                     break
                 if len(tried) >= len(candidates):
                     break

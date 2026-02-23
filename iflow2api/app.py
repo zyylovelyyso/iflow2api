@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from .config import load_iflow_config, check_iflow_login, IFlowConfig
 from .proxy_manager import ProxyManager
-from .routing import load_routing_config
+from .routing import KeyRoutingConfig, load_routing_config
 from .routing_refresher import start_global_routing_refresher, stop_global_routing_refresher
 from .web_ui import router as web_ui_router
 
@@ -23,7 +23,11 @@ _proxy_manager: Optional[ProxyManager] = None
 def get_proxy_manager() -> ProxyManager:
     global _proxy_manager
     if _proxy_manager is None:
-        routing = load_routing_config()
+        try:
+            routing = load_routing_config()
+        except Exception as ex:
+            print(f"[警告] keys.json 路由配置无效，已降级为空路由: {ex}", file=sys.stderr)
+            routing = KeyRoutingConfig()
         _proxy_manager = ProxyManager(routing)
     return _proxy_manager
 
@@ -42,8 +46,6 @@ async def lifespan(app: FastAPI):
                 f"[iflow2api] 来访鉴权: {'启用' if routing.auth.enabled else '关闭'}"
                 + (" (required)" if (routing.auth.enabled and routing.auth.required) else "")
             )
-            # Multi-account auto-refresh (best-effort, no secrets printed).
-            start_global_routing_refresher(log=lambda s: print(f"[iflow2api] {s}"))
         else:
             config = load_iflow_config()
             print(f"[iflow2api] 已加载 iFlow 配置")
@@ -58,6 +60,13 @@ async def lifespan(app: FastAPI):
     except ValueError as e:
         print(f"[错误] {e}", file=sys.stderr)
         print("[提示] 配置错误。你仍可打开 /ui 检查/修复账号池配置。", file=sys.stderr)
+    finally:
+        # Always start refresher loop: first OAuth login may happen after startup.
+        # It is best-effort and simply no-ops when no OAuth accounts exist.
+        try:
+            start_global_routing_refresher(log=lambda s: print(f"[iflow2api] {s}"))
+        except Exception as ex:
+            print(f"[警告] OAuth 自动续期守护启动失败: {ex}", file=sys.stderr)
 
     yield
 

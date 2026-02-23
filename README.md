@@ -17,15 +17,18 @@
 
 | 模型 ID | 名称 | 说明 |
 |---------|------|------|
-| `glm-4.7` | GLM-4.7 | 智谱 GLM-4.7 |
-| `minimax-m2.1` | MiniMax-M2.1 | MiniMax M2.1 |
-| `iflow-rome-30ba3b` | iFlow-ROME-30BA3B | iFlow ROME 30B |
-| `deepseek-r1` | DeepSeek-R1 | DeepSeek 推理（思考）模型 |
-| `deepseek-v3.2` | DeepSeek-V3.2 | DeepSeek V3.2 |
-| `qwen3-coder-plus` | Qwen3-Coder-Plus | 通义千问 Qwen3 Coder Plus |
-| `kimi-k2-0905` | Kimi-K2-0905 | Moonshot Kimi K2 0905 |
+| `glm-5` | GLM-5 | 智谱 GLM-5 旗舰模型 |
+| `minimax-m2.5` | MiniMax-M2.5 | MiniMax M2.5 Agentic |
+| `kimi-k2.5` | Kimi-K2.5 | Moonshot Kimi K2.5 |
 
 > 实际可用模型以 `GET /v1/models` 返回为准（优先直连上游 `/models`；失败时回退到内置“已知集合”）。
+>
+> 模型匹配说明（严格模式）：
+> - iflow2api 默认按请求中的模型 ID 原样转发，不做模型名替换
+> - 若某账号不支持该模型，会自动尝试同路由中的其他账号
+> - 若所有账号都不支持，将返回上游错误（如 `Model not support`）
+>
+> 思考默认开启：对 `glm-5` / `minimax-m2.5` / `kimi-k2.5`（含 `iflow/<model>` 写法），若请求未显式传 `enable_thinking` / `thinking` / `reasoning` 字段，iflow2api 会自动注入 `enable_thinking=true`。
 
 ## 前置条件
 
@@ -99,7 +102,7 @@ python -c "import uvicorn; from iflow2api.app import app; uvicorn.run(app, host=
 | `/health` | GET | 健康检查 |
 | `/v1/models` | GET | 获取可用模型列表 |
 | `/v1/chat/completions` | POST | Chat Completions API |
-| `/ui` | GET | 本地 Web 控制台（账号池管理 / OAuth 登录） |
+| `/ui` | GET | 本地 Web 控制台（账号池管理 / OAuth 登录 / OpenCode 同步） |
 | `/models` | GET | 兼容端点 (不带 /v1 前缀) |
 | `/chat/completions` | POST | 兼容端点 (不带 /v1 前缀) |
 
@@ -117,14 +120,14 @@ client = OpenAI(
 
 # 非流式请求
 response = client.chat.completions.create(
-    model="glm-4.7",
+    model="glm-5",
     messages=[{"role": "user", "content": "你好！"}]
 )
 print(response.choices[0].message.content)
 
 # 流式请求
 stream = client.chat.completions.create(
-    model="glm-4.7",
+    model="glm-5",
     messages=[{"role": "user", "content": "写一首诗"}],
     stream=True
 )
@@ -147,7 +150,7 @@ curl http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer sk-your-local-key" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "glm-4.7",
+    "model": "glm-5",
     "messages": [{"role": "user", "content": "你好！"}]
   }'
 
@@ -156,7 +159,7 @@ curl http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer sk-your-local-key" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "glm-4.7",
+    "model": "glm-5",
     "messages": [{"role": "user", "content": "你好！"}],
     "stream": true
   }'
@@ -190,7 +193,7 @@ curl http://localhost:8000/v1/chat/completions \
 
 1. 在 Edge 里创建多个 Profile（每个 Profile 登录一个 iFlow 账号）
 2. 启动服务后打开 `http://localhost:8000/ui`
-3. 选择 `Edge Profile` → 点击“添加账号（Edge Profile OAuth）”
+3. 选择 `Edge Profile` → 点击“Profile 登录并添加”
 4. 登录成功后会写入 `keys.json`，并保存 `oauth_refresh_token / oauth_expires_at`（不会在日志里打印明文）
 5. 服务启动后会后台自动刷新 OAuth token，并在遇到上游 `439 Token expired` 时自动刷新后重试
 
@@ -250,7 +253,7 @@ curl http://localhost:8000/v1/chat/completions \
 如果 OpenCode 支持 OpenAI 兼容 `Chat Completions` + 自定义 Base URL：
 - Base URL: `http://127.0.0.1:8000/v1`
 - API Key: 填 `keys.json` 里配置的任意一个 token（例如 `sk-local-user-a`）
-- Model: 使用 iFlow 模型 ID（例如 `glm-4.7`）
+- Model: 使用 iFlow 模型 ID（例如 `glm-5`）
 
 ## 架构
 
@@ -286,7 +289,7 @@ curl http://localhost:8000/v1/chat/completions \
 iFlow API 通过 `User-Agent` header 区分普通 API 调用和 CLI 调用:
 
 - **普通 API 调用**: 只能使用基础模型
-- **CLI 调用** (`User-Agent: iFlow-Cli`): 可使用 GLM-4.7、DeepSeek、Kimi 等高级模型
+- **CLI 调用** (`User-Agent: iFlow-Cli`): 可使用 GLM-5、MiniMax-M2.5、Kimi-K2.5 等高级模型
 
 本项目通过在请求中添加 `User-Agent: iFlow-Cli` header，让普通 API 客户端也能访问 CLI 专属模型。
 

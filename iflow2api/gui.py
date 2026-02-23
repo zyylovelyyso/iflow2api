@@ -29,6 +29,28 @@ from .opencode import discover_config_paths, ensure_iflow_provider
 from .model_catalog import get_recommended_models
 
 
+def _humanize_expiry(exp: Optional[datetime]) -> str:
+    if exp is None:
+        return "未知"
+    try:
+        exp_utc = exp if exp.tzinfo else exp.replace(tzinfo=timezone.utc)
+        seconds = int((exp_utc - datetime.now(timezone.utc)).total_seconds())
+    except Exception:
+        return "未知"
+    if seconds <= 0:
+        return "已过期"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"约 {minutes} 分钟"
+    hours = minutes // 60
+    rem_minutes = minutes % 60
+    if hours < 24:
+        return f"约 {hours} 小时" if rem_minutes == 0 else f"约 {hours} 小时 {rem_minutes} 分"
+    days = hours // 24
+    rem_hours = hours % 24
+    return f"约 {days} 天" if rem_hours == 0 else f"约 {days} 天 {rem_hours} 小时"
+
+
 class IFlow2ApiApp:
     """iflow2api GUI 应用"""
 
@@ -85,6 +107,7 @@ class IFlow2ApiApp:
         self.opencode_default_model_dropdown: Optional[ft.Dropdown] = None
         self.opencode_set_small_checkbox: Optional[ft.Checkbox] = None
         self.opencode_small_model_dropdown: Optional[ft.Dropdown] = None
+        self.opencode_sync_all_checkbox: Optional[ft.Checkbox] = None
 
         self.start_btn: Optional[ft.Button] = None
         self.stop_btn: Optional[ft.Button] = None
@@ -104,10 +127,17 @@ class IFlow2ApiApp:
     def _setup_page(self):
         """设置页面"""
         self.page.title = "iflow2api"
-        self.page.window.width = 500
+        self.page.theme_mode = ft.ThemeMode.DARK
+        self.page.theme = ft.Theme(
+            color_scheme_seed="#38bdf8",
+            use_material3=True,
+            font_family="Microsoft YaHei UI",
+        )
+        self.page.bgcolor = "#0b1220"
+        self.page.window.width = 560
         self.page.window.height = 980
         self.page.window.resizable = True
-        self.page.window.min_width = 400
+        self.page.window.min_width = 460
         self.page.window.min_height = 500
         self.page.padding = 20
 
@@ -150,9 +180,10 @@ class IFlow2ApiApp:
                 ],
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             ),
-            padding=10,
-            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
-            border_radius=8,
+            padding=12,
+            bgcolor="#111a2e",
+            border=ft.border.all(1, "#263652"),
+            border_radius=12,
         )
 
         # 服务器配置
@@ -178,8 +209,9 @@ class IFlow2ApiApp:
                 ]
             ),
             padding=15,
-            border=ft.border.all(1, ft.Colors.OUTLINE),
-            border_radius=8,
+            bgcolor="#111a2e",
+            border=ft.border.all(1, "#263652"),
+            border_radius=12,
         )
 
         # 配置区：账号池（推荐）+ 单账号（兼容）
@@ -223,8 +255,9 @@ class IFlow2ApiApp:
                 ]
             ),
             padding=15,
-            border=ft.border.all(1, ft.Colors.OUTLINE),
-            border_radius=8,
+            bgcolor="#111a2e",
+            border=ft.border.all(1, "#263652"),
+            border_radius=12,
         )
 
         # 操作按钮
@@ -232,14 +265,14 @@ class IFlow2ApiApp:
             "启动服务",
             icon=ft.Icons.PLAY_ARROW,
             on_click=self._start_server,
-            style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN, color=ft.Colors.WHITE),
+            style=ft.ButtonStyle(bgcolor="#06b6d4", color=ft.Colors.WHITE),
         )
         self.stop_btn = ft.Button(
             "停止服务",
             icon=ft.Icons.STOP,
             on_click=self._stop_server,
             disabled=True,
-            style=ft.ButtonStyle(bgcolor=ft.Colors.RED, color=ft.Colors.WHITE),
+            style=ft.ButtonStyle(bgcolor="#e11d48", color=ft.Colors.WHITE),
         )
         save_btn = ft.Button(
             "保存配置",
@@ -266,8 +299,9 @@ class IFlow2ApiApp:
 	                    ft.Container(
 	                        content=self.log_list,
 	                        height=150,
-	                        border=ft.border.all(1, ft.Colors.OUTLINE),
-	                        border_radius=8,
+	                        bgcolor="#0b1326",
+	                        border=ft.border.all(1, "#263652"),
+	                        border_radius=10,
 	                        padding=10,
 	                    ),
                 ]
@@ -334,8 +368,9 @@ class IFlow2ApiApp:
                 ]
             ),
             padding=15,
-            border=ft.border.all(1, ft.Colors.OUTLINE),
-            border_radius=8,
+            bgcolor="#111a2e",
+            border=ft.border.all(1, "#263652"),
+            border_radius=12,
         )
 
     def _build_pool_config(self) -> ft.Control:
@@ -474,8 +509,9 @@ class IFlow2ApiApp:
                 spacing=8,
             ),
             padding=12,
-            border=ft.border.all(1, ft.Colors.OUTLINE),
-            border_radius=8,
+            bgcolor="#0d162b",
+            border=ft.border.all(1, "#263652"),
+            border_radius=10,
         )
 
         # OpenCode 集成
@@ -485,6 +521,10 @@ class IFlow2ApiApp:
             options=[ft.dropdown.Option(str(p)) for p in opencode_paths],
             value=str(opencode_paths[0]) if opencode_paths else "",
             expand=True,
+        )
+        self.opencode_sync_all_checkbox = ft.Checkbox(
+            label="同时同步所有已发现配置（CLI + 桌面版）",
+            value=True,
         )
         self.opencode_provider_field = ft.TextField(
             label="Provider 名称",
@@ -522,7 +562,7 @@ class IFlow2ApiApp:
             "一键写入 OpenCode 配置",
             icon=ft.Icons.SETTINGS,
             on_click=self._configure_opencode,
-            style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN, color=ft.Colors.WHITE),
+            style=ft.ButtonStyle(bgcolor="#10b981", color=ft.Colors.WHITE),
         )
         opencode_test_btn = ft.TextButton(
             "本地自检",
@@ -535,6 +575,7 @@ class IFlow2ApiApp:
                 [
                     ft.Text("OpenCode 集成", weight=ft.FontWeight.BOLD),
                     self.opencode_path_dropdown,
+                    self.opencode_sync_all_checkbox,
                     ft.Row(
                         [
                             self.opencode_provider_field,
@@ -555,8 +596,9 @@ class IFlow2ApiApp:
                 spacing=8,
             ),
             padding=12,
-            border=ft.border.all(1, ft.Colors.OUTLINE),
-            border_radius=8,
+            bgcolor="#0d162b",
+            border=ft.border.all(1, "#263652"),
+            border_radius=10,
         )
 
         self._refresh_accounts_table()
@@ -592,8 +634,9 @@ class IFlow2ApiApp:
                     ),
                     ft.Container(
                         content=self.accounts_table,
-                        border=ft.border.all(1, ft.Colors.OUTLINE),
-                        border_radius=8,
+                        bgcolor="#0b1326",
+                        border=ft.border.all(1, "#263652"),
+                        border_radius=10,
                         padding=8,
                     ),
                     resilience_box,
@@ -602,8 +645,9 @@ class IFlow2ApiApp:
                 spacing=12,
             ),
             padding=15,
-            border=ft.border.all(1, ft.Colors.OUTLINE),
-            border_radius=8,
+            bgcolor="#111a2e",
+            border=ft.border.all(1, "#263652"),
+            border_radius=12,
         )
 
     def _add_log(self, message: str):
@@ -719,7 +763,7 @@ class IFlow2ApiApp:
         if total <= 0:
             self.accounts_summary.value = "账号池: 0"
         else:
-            self.accounts_summary.value = f"账号池: {enabled}/{total} · oauth {oauth}"
+            self.accounts_summary.value = f"账号池: {enabled}/{total} · OAuth {oauth}"
 
     def _refresh_accounts_table(self):
         if not self.accounts_table:
@@ -750,20 +794,18 @@ class IFlow2ApiApp:
                 on_click=lambda e, aid=account_id: self._remove_account(aid),
             )
 
-            auth_kind = "oauth" if getattr(acc, "oauth_refresh_token", None) else "api-key"
-            extra = auth_kind
-            exp = getattr(acc, "oauth_expires_at", None)
-            if exp is not None:
-                try:
-                    now = datetime.now(tz=exp.tzinfo) if getattr(exp, "tzinfo", None) else datetime.now()
-                    seconds = int((exp - now).total_seconds())
-                    if seconds < 0:
-                        extra = f"{auth_kind} · expired"
-                    else:
-                        minutes = max(0, seconds // 60)
-                        extra = f"{auth_kind} · exp {minutes}m"
-                except Exception:
-                    pass
+            is_oauth = bool(getattr(acc, "oauth_refresh_token", None))
+            auth_kind = "OAuth" if is_oauth else "API Key"
+            extra = f"{auth_kind} · 长期有效"
+            if is_oauth:
+                exp = getattr(acc, "oauth_expires_at", None)
+                exp_text = _humanize_expiry(exp)
+                failures = int(getattr(acc, "refresh_failures", 0) or 0)
+                err = getattr(acc, "last_refresh_error", None)
+                if err:
+                    extra = f"{auth_kind} · 续期异常({failures}次)"
+                else:
+                    extra = f"{auth_kind} · 剩余 {exp_text}"
 
             label_cell = ft.Column(
                 [
@@ -952,7 +994,21 @@ class IFlow2ApiApp:
     def _configure_opencode(self, e):
         """一键写入 OpenCode 配置文件，添加 provider=iflow。"""
         config_path_str = (self.opencode_path_dropdown.value or "").strip() if self.opencode_path_dropdown else ""
-        if not config_path_str:
+        sync_all = bool(self.opencode_sync_all_checkbox.value) if self.opencode_sync_all_checkbox else False
+
+        targets: list[Path] = []
+        if sync_all:
+            targets = discover_config_paths(self.settings.opencode_config_path)
+            if config_path_str:
+                selected = Path(config_path_str)
+                if selected.exists() and selected not in targets:
+                    targets.append(selected)
+        elif config_path_str:
+            selected = Path(config_path_str)
+            if selected.exists():
+                targets = [selected]
+
+        if not targets:
             self.page.open(
                 ft.SnackBar(content=ft.Text("未找到 OpenCode 配置文件"), bgcolor=ft.Colors.RED)
             )
@@ -960,31 +1016,32 @@ class IFlow2ApiApp:
 
         provider_name = (self.opencode_provider_field.value or "iflow").strip() if self.opencode_provider_field else "iflow"
         self.settings.opencode_provider_name = provider_name
-        self.settings.opencode_config_path = config_path_str
         self.settings.opencode_set_default_model = bool(self.opencode_set_default_checkbox.value) if self.opencode_set_default_checkbox else False
         self.settings.opencode_default_model = (self.opencode_default_model_dropdown.value or self.settings.opencode_default_model).strip() if self.opencode_default_model_dropdown else self.settings.opencode_default_model
         self.settings.opencode_set_small_model = bool(self.opencode_set_small_checkbox.value) if self.opencode_set_small_checkbox else False
         self.settings.opencode_small_model = (self.opencode_small_model_dropdown.value or self.settings.opencode_small_model).strip() if self.opencode_small_model_dropdown else self.settings.opencode_small_model
+        self.settings.opencode_config_path = str(targets[0])
         save_settings(self.settings)
 
         port = self.settings.port
         base_url = f"http://127.0.0.1:{port}/v1"
 
         try:
-            ensure_iflow_provider(
-                config_path=Path(config_path_str),
-                provider_name=provider_name,
-                base_url=base_url,
-                api_key=self.settings.client_api_key,
-                set_default_model=self.settings.opencode_set_default_model,
-                default_model=self.settings.opencode_default_model,
-                set_small_model=self.settings.opencode_set_small_model,
-                small_model=self.settings.opencode_small_model,
-            )
+            for target in targets:
+                ensure_iflow_provider(
+                    config_path=target,
+                    provider_name=provider_name,
+                    base_url=base_url,
+                    api_key=self.settings.client_api_key,
+                    set_default_model=self.settings.opencode_set_default_model,
+                    default_model=self.settings.opencode_default_model,
+                    set_small_model=self.settings.opencode_set_small_model,
+                    small_model=self.settings.opencode_small_model,
+                )
             self.page.open(
-                ft.SnackBar(content=ft.Text("已写入 OpenCode 配置"), bgcolor=ft.Colors.GREEN)
+                ft.SnackBar(content=ft.Text(f"已写入 OpenCode 配置（{len(targets)} 个文件）"), bgcolor=ft.Colors.GREEN)
             )
-            self._add_log("已写入 OpenCode 配置（provider=iflow）")
+            self._add_log(f"已写入 OpenCode 配置（provider=iflow，目标数={len(targets)}）")
         except Exception as ex:
             self.page.open(
                 ft.SnackBar(content=ft.Text(f"写入失败: {ex}"), bgcolor=ft.Colors.RED)

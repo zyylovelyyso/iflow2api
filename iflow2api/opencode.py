@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -17,11 +18,27 @@ from .model_catalog import get_recommended_models, to_opencode_models
 
 
 def _safe_read_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
+    # Tolerate UTF-8 BOM written by some editors/tools.
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def _safe_write_json(path: Path, data: dict[str, Any]) -> None:
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    payload = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+    tmp_path: Optional[Path] = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=str(path.parent),
+            delete=False,
+            prefix=path.name + ".tmp.",
+        ) as f:
+            f.write(payload)
+            tmp_path = Path(f.name)
+        tmp_path.replace(path)
+    finally:
+        if tmp_path and tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)  # type: ignore[arg-type]
 
 
 def discover_config_paths(explicit: str = "") -> list[Path]:
@@ -29,7 +46,7 @@ def discover_config_paths(explicit: str = "") -> list[Path]:
     if explicit:
         p = Path(explicit)
         if p.exists():
-            return [p]
+            paths.append(p)
 
     # Common locations (Windows)
     candidates = [
@@ -64,9 +81,9 @@ def ensure_iflow_provider(
     base_url: str,
     api_key: str,
     set_default_model: bool = False,
-    default_model: str = "glm-4.7",
+    default_model: str = "glm-5",
     set_small_model: bool = False,
-    small_model: str = "minimax-m2.1",
+    small_model: str = "minimax-m2.5",
     create_backup: bool = True,
 ) -> UpdateResult:
     cfg = _safe_read_json(config_path)

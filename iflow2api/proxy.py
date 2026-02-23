@@ -1,6 +1,11 @@
 """API 代理服务 - 转发请求到 iFlow API"""
 
 import asyncio
+import hashlib
+import hmac
+import json
+import time
+import uuid
 import httpx
 from typing import AsyncIterator, Optional
 from contextlib import asynccontextmanager
@@ -11,6 +16,68 @@ from .config import IFlowConfig
 IFLOW_CLI_USER_AGENT = "iFlow-Cli"
 
 
+class _UpstreamErrorResponse:
+    def __init__(self, status_code: int, payload: dict):
+        self.status_code = int(status_code)
+        self._payload = payload
+
+    def json(self) -> dict:
+        return self._payload
+
+
+class IFlowUpstreamError(Exception):
+    """Upstream business error returned in JSON payload (often with HTTP 200)."""
+
+    def __init__(self, status_code: int, message: str, payload: dict):
+        super().__init__(message)
+        self.response = _UpstreamErrorResponse(status_code, payload)
+
+
+def _raise_iflow_payload_error(payload: dict) -> None:
+    if not isinstance(payload, dict):
+        return
+    code_raw = payload.get("status")
+    msg_raw = payload.get("msg") or payload.get("message")
+    if code_raw is None:
+        return
+    try:
+        code = int(str(code_raw).strip())
+    except Exception:
+        return
+    if code in (0, 200):
+        return
+    msg = str(msg_raw or f"Upstream error {code}")
+    raise IFlowUpstreamError(code, msg, payload)
+
+
+def _add_reasoning_aliases(payload: dict) -> dict:
+    """
+    Normalize reasoning fields for wider OpenAI-compatible client support.
+
+    iFlow often uses `reasoning_content`; some clients render gray "thinking"
+    blocks only when a `reasoning` field exists.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    choices = payload.get("choices")
+    if not isinstance(choices, list):
+        return payload
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        msg = choice.get("message")
+        if isinstance(msg, dict):
+            rc = msg.get("reasoning_content")
+            if rc is not None and "reasoning" not in msg:
+                msg["reasoning"] = rc
+        delta = choice.get("delta")
+        if isinstance(delta, dict):
+            rc = delta.get("reasoning_content")
+            if rc is not None and "reasoning" not in delta:
+                delta["reasoning"] = rc
+    return payload
+
+
 class IFlowProxy:
     """iFlow API 代理"""
 
@@ -18,6 +85,8 @@ class IFlowProxy:
         self.config = config
         self.base_url = config.base_url.rstrip("/")
         self._client: Optional[httpx.AsyncClient] = None
+        self._session_id = uuid.uuid4().hex
+        self._conversation_id = uuid.uuid4().hex
         self._max_concurrency = max_concurrency
         self._semaphore: Optional[asyncio.Semaphore] = (
             asyncio.Semaphore(max_concurrency) if max_concurrency and max_concurrency > 0 else None
@@ -53,6 +122,39 @@ class IFlowProxy:
             "Authorization": f"Bearer {self.config.api_key}",
             "User-Agent": IFLOW_CLI_USER_AGENT,  # 大写以解锁 CLI 专属模型
         }
+
+    def _get_chat_headers(self) -> dict:
+        """
+        获取 chat/completions 请求头（含 iFlow CLI 风格签名字段）。
+
+        iFlow 某些模型（如 glm-5 / minimax-m2.5 / kimi-k2.5）需要额外头部：
+        - session-id
+        - conversation-id
+        - x-iflow-timestamp (ms)
+        - x-iflow-signature (hmac-sha256)
+        """
+        headers = self._get_headers()
+        api_key = str(self.config.api_key or "")
+        if not api_key:
+            return headers
+
+        timestamp_ms = str(int(time.time() * 1000))
+        payload = f"{IFLOW_CLI_USER_AGENT}:{self._session_id}:{timestamp_ms}"
+        signature = hmac.new(
+            api_key.encode("utf-8"),
+            payload.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+
+        headers.update(
+            {
+                "session-id": self._session_id,
+                "conversation-id": self._conversation_id,
+                "x-iflow-timestamp": timestamp_ms,
+                "x-iflow-signature": signature,
+            }
+        )
+        return headers
 
     async def _get_client(self) -> httpx.AsyncClient:
         """获取或创建 HTTP 客户端"""
@@ -143,11 +245,13 @@ class IFlowProxy:
             async with self._limit():
                 response = await client.post(
                     f"{self.base_url}/chat/completions",
-                    headers=self._get_headers(),
+                    headers=self._get_chat_headers(),
                     json=request_body,
                 )
                 response.raise_for_status()
                 result = response.json()
+                _raise_iflow_payload_error(result)
+                result = _add_reasoning_aliases(result)
 
             # 确保 usage 统计信息存在 (OpenAI 兼容)
             if "usage" not in result:
@@ -169,12 +273,22 @@ class IFlowProxy:
             async with client.stream(
                 "POST",
                 f"{self.base_url}/chat/completions",
-                headers=self._get_headers(),
+                headers=self._get_chat_headers(),
                 json=request_body,
             ) as response:
                 response.raise_for_status()
-                async for chunk in response.aiter_bytes():
-                    yield chunk
+                async for line in response.aiter_lines():
+                    out = line
+                    if line.startswith("data:"):
+                        raw = line[5:].strip()
+                        if raw and raw != "[DONE]":
+                            try:
+                                obj = json.loads(raw)
+                                obj = _add_reasoning_aliases(obj)
+                                out = "data:" + json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+                            except Exception:
+                                out = line
+                    yield (out + "\n").encode("utf-8")
 
     async def proxy_request(
         self,
@@ -201,10 +315,12 @@ class IFlowProxy:
         if stream and method.upper() == "POST":
             return self._stream_request(client, url, body)
 
+        headers = self._get_chat_headers() if path.rstrip("/").endswith("/chat/completions") else self._get_headers()
+
         if method.upper() == "GET":
             response = await client.get(url, headers=self._get_headers())
         elif method.upper() == "POST":
-            response = await client.post(url, headers=self._get_headers(), json=body)
+            response = await client.post(url, headers=headers, json=body)
         else:
             raise ValueError(f"不支持的 HTTP 方法: {method}")
 
@@ -221,7 +337,7 @@ class IFlowProxy:
         async with client.stream(
             "POST",
             url,
-            headers=self._get_headers(),
+            headers=self._get_chat_headers() if url.rstrip("/").endswith("/chat/completions") else self._get_headers(),
             json=body,
         ) as response:
             response.raise_for_status()
