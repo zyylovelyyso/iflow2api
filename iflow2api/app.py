@@ -13,6 +13,7 @@ from .config import load_iflow_config, check_iflow_login, IFlowConfig
 from .proxy_manager import ProxyManager
 from .routing import KeyRoutingConfig, load_routing_config
 from .routing_refresher import start_global_routing_refresher, stop_global_routing_refresher
+from .usage_tracker import get_usage_tracker
 from .web_ui import router as web_ui_router
 
 
@@ -205,8 +206,33 @@ async def chat_completions(request: Request):
         if stream:
             # 流式响应
             async def generate():
+                tracker = get_usage_tracker()
+                usage_recorded = False
+                requested_model = body.get("model")
                 async for chunk in await manager.chat_completions(request, body, stream=True):
+                    if not usage_recorded:
+                        try:
+                            text = chunk.decode("utf-8", errors="ignore")
+                            for line in text.splitlines():
+                                if not line.startswith("data:"):
+                                    continue
+                                raw = line[5:].strip()
+                                if not raw or raw == "[DONE]":
+                                    continue
+                                obj = json.loads(raw)
+                                if not isinstance(obj, dict):
+                                    continue
+                                model = obj.get("model") if isinstance(obj.get("model"), str) else requested_model
+                                usage = obj.get("usage")
+                                if isinstance(usage, dict):
+                                    tracker.record(model=model, usage=usage)
+                                    usage_recorded = True
+                                    break
+                        except Exception:
+                            pass
                     yield chunk
+                if not usage_recorded:
+                    tracker.record(model=requested_model, usage=None)
 
             return StreamingResponse(
                 generate(),
@@ -220,6 +246,10 @@ async def chat_completions(request: Request):
         else:
             # 非流式响应
             result = await manager.chat_completions(request, body, stream=False)
+            get_usage_tracker().record(
+                model=result.get("model") if isinstance(result, dict) else body.get("model"),
+                usage=result.get("usage") if isinstance(result, dict) else None,
+            )
             return JSONResponse(content=result)
 
     except json.JSONDecodeError as e:

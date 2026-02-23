@@ -34,6 +34,7 @@ from .routing_refresher import (
     RoutingOAuthRefresher,
 )
 from .settings import load_settings, save_settings
+from .usage_tracker import get_usage_tracker
 
 
 router = APIRouter()
@@ -580,6 +581,21 @@ tr:hover td { background: rgba(54,217,255,.05); }
       </div>
 
       <div class=\"card\">
+        <h2>Token 消耗统计</h2>
+        <p class=\"hint\">仅统计本地网关收到并成功返回的请求。没有“剩余额度”，仅展示累计消耗。</p>
+        <div class=\"kv\" id=\"usageKV\"></div>
+        <table id=\"usageTable\" style=\"margin-top:8px;display:none\">
+          <thead>
+            <tr><th>模型</th><th>请求数</th><th>Prompt</th><th>Completion</th><th>Total</th></tr>
+          </thead>
+          <tbody id=\"usageTbody\"></tbody>
+        </table>
+        <div class=\"row\" style=\"margin-top:8px\">
+          <button class=\"alt\" id=\"btnResetUsage\">清空统计</button>
+        </div>
+      </div>
+
+      <div class=\"card\">
         <h2>OpenCode 同步</h2>
         <p class=\"hint\">同步 iflow provider 到所有检测到的 OpenCode 配置（CLI + 桌面版）。模型按请求名严格匹配；思考参数默认开启。</p>
         <div id=\"paths\" class=\"paths\"></div>
@@ -688,6 +704,11 @@ function setStatus(ok, text){
   statusTextEl.textContent = text;
 }
 
+function formatNum(v){
+  const n = Number(v || 0);
+  return Number.isFinite(n) ? n.toLocaleString('zh-CN') : '0';
+}
+
 function boolTag(ok){
   return ok ? '<span class=\"tag ok\">是</span>' : '<span class=\"tag err\">否</span>';
 }
@@ -781,6 +802,40 @@ function renderOpenCode(state){
   $('paths').innerHTML = paths.length
     ? paths.map((p) => `<div class=\"path-line\">${esc(p)}</div>`).join('')
     : '<div class=\"path-line\">未发现 OpenCode 配置文件。</div>';
+}
+
+function renderUsage(state){
+  const usage = state.usage || {};
+  const totals = usage.totals || {};
+  const today = usage.today || {};
+  const updatedAt = usage.updated_at || '-';
+
+  $('usageKV').innerHTML = `
+    <div class=\"k\">累计请求</div><div><span class=\"code\">${formatNum(totals.requests)}</span></div>
+    <div class=\"k\">累计 Total Tokens</div><div><span class=\"code\">${formatNum(totals.total_tokens)}</span></div>
+    <div class=\"k\">今日请求</div><div><span class=\"code\">${formatNum(today.requests)}</span></div>
+    <div class=\"k\">今日 Total Tokens</div><div><span class=\"code\">${formatNum(today.total_tokens)}</span></div>
+    <div class=\"k\">更新时间</div><div><span class=\"code\">${esc(updatedAt)}</span></div>
+  `;
+
+  const tableEl = $('usageTable');
+  const tbodyEl = $('usageTbody');
+  const byModel = usage.by_model || [];
+  if (!byModel.length) {
+    tableEl.style.display = 'none';
+    tbodyEl.innerHTML = '';
+    return;
+  }
+  tableEl.style.display = 'table';
+  tbodyEl.innerHTML = byModel.map((item) => `
+    <tr>
+      <td><span class=\"code\">${esc(item.model || '')}</span></td>
+      <td>${formatNum(item.requests)}</td>
+      <td>${formatNum(item.prompt_tokens)}</td>
+      <td>${formatNum(item.completion_tokens)}</td>
+      <td>${formatNum(item.total_tokens)}</td>
+    </tr>
+  `).join('');
 }
 
 function renderAccounts(state){
@@ -905,6 +960,7 @@ async function refreshState(){
     setStatus(Boolean(state.iflow_logged_in), state.iflow_logged_in ? '账号可用' : '未配置可用账号');
     renderRenew(state);
     renderClient(state);
+    renderUsage(state);
     renderOpenCode(state);
     renderAccounts(state);
   } catch (error) {
@@ -1019,6 +1075,19 @@ async function refreshNow(){
   }
 }
 
+async function resetUsage(){
+  if (!confirm('确认清空 Token 消耗统计吗？此操作不可恢复。')) return;
+  try {
+    await api('/ui/api/usage/reset', { method: 'POST', body: '{}' });
+    log('Token 消耗统计已清空');
+    toast('统计已清空');
+    await refreshState();
+  } catch (error) {
+    log(`清空统计失败：${error}`);
+    toast('清空统计失败');
+  }
+}
+
 async function probeModels(){
   const btn = $('btnProbeModels');
   if (btn) btn.disabled = true;
@@ -1050,6 +1119,7 @@ $('btnKey').onclick = regenerateKey;
 $('btnSync').onclick = syncOpenCode;
 $('btnRefresh').onclick = refreshState;
 $('btnRefreshNow').onclick = refreshNow;
+$('btnResetUsage').onclick = resetUsage;
 $('btnProbeModels').onclick = probeModels;
 $('btnAutoRefresh').onclick = toggleAutoRefresh;
 $('autoRefreshSeconds').onchange = () => {
@@ -1165,6 +1235,25 @@ async def ui_state(request: Request):
         preferred_default=settings.opencode_default_model,
         preferred_small=settings.opencode_small_model,
     )
+    usage_snapshot = get_usage_tracker().snapshot()
+    today_key = datetime.now(timezone.utc).date().isoformat()
+    usage_today = usage_snapshot.get("days", {}).get(today_key, {}) if isinstance(usage_snapshot.get("days"), dict) else {}
+    usage_models: list[dict] = []
+    models_data = usage_snapshot.get("models")
+    if isinstance(models_data, dict):
+        for model_id, bucket in models_data.items():
+            if not isinstance(model_id, str) or not isinstance(bucket, dict):
+                continue
+            usage_models.append(
+                {
+                    "model": model_id,
+                    "requests": int(bucket.get("requests") or 0),
+                    "prompt_tokens": int(bucket.get("prompt_tokens") or 0),
+                    "completion_tokens": int(bucket.get("completion_tokens") or 0),
+                    "total_tokens": int(bucket.get("total_tokens") or 0),
+                }
+            )
+    usage_models.sort(key=lambda item: (item["total_tokens"], item["requests"]), reverse=True)
 
     return {
         "iflow_logged_in": iflow_logged_in,
@@ -1183,6 +1272,12 @@ async def ui_state(request: Request):
         "opencode_small_model": small_model,
         "auto_refresh_check_interval_seconds": DEFAULT_REFRESH_CHECK_INTERVAL_SECONDS,
         "auto_refresh_buffer_seconds": DEFAULT_REFRESH_BUFFER_SECONDS,
+        "usage": {
+            "updated_at": usage_snapshot.get("updated_at"),
+            "totals": usage_snapshot.get("totals", {}),
+            "today": usage_today if isinstance(usage_today, dict) else {},
+            "by_model": usage_models[:12],
+        },
     }
 
 
@@ -1192,6 +1287,16 @@ async def ui_oauth_refresh_now(request: Request):
     refresher = RoutingOAuthRefresher(log=None)
     await asyncio.to_thread(refresher.refresh_once)
     return {"ok": True}
+
+
+@router.post("/ui/api/usage/reset")
+async def ui_usage_reset(request: Request):
+    _require_ui_allowed(request)
+    stats = get_usage_tracker().reset()
+    return {
+        "ok": True,
+        "updated_at": stats.get("updated_at"),
+    }
 
 
 @router.post("/ui/api/models/probe")
