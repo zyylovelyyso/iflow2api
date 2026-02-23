@@ -241,6 +241,7 @@ async def chat_completions(request: Request):
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
                     "X-Accel-Buffering": "no",
+                    "X-IFLOW2API-REQUEST-MODEL": str(body.get("model", "")),
                 },
             )
         else:
@@ -250,7 +251,11 @@ async def chat_completions(request: Request):
                 model=result.get("model") if isinstance(result, dict) else body.get("model"),
                 usage=result.get("usage") if isinstance(result, dict) else None,
             )
-            return JSONResponse(content=result)
+            headers = {
+                "X-IFLOW2API-REQUEST-MODEL": str(body.get("model", "")),
+                "X-IFLOW2API-UPSTREAM-MODEL": str(result.get("model", "")) if isinstance(result, dict) else "",
+            }
+            return JSONResponse(content=result, headers=headers)
 
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")

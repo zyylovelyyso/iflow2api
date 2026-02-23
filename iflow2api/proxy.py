@@ -167,17 +167,12 @@ class IFlowProxy:
                 max_connections = 100
                 max_keepalive = 20
 
-            # http2 requires optional dependency `h2`; fall back gracefully.
+            # Keep HTTP/1.1 by default for better upstream stability.
+            # Some users observed intermittent stream resets on HTTP/2 paths.
             http2_enabled = False
-            try:
-                import h2  # noqa: F401
-
-                http2_enabled = True
-            except Exception:
-                http2_enabled = False
 
             self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(300.0, connect=10.0),
+                timeout=httpx.Timeout(connect=10.0, read=1200.0, write=120.0, pool=30.0),
                 follow_redirects=True,
                 http2=http2_enabled,
                 limits=httpx.Limits(

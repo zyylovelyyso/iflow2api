@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Optional
@@ -39,6 +40,49 @@ _MODEL_COMPAT_CANDIDATES: dict[str, tuple[str, ...]] = {
     "kimi-k2.5": ("kimi-k2.5", "kimi-k2-0905", "kimi-k2"),
 }
 _ENABLE_MODEL_COMPAT_FALLBACK = False
+_ENFORCE_MODEL_STRICT_MATCH = True
+
+
+def _normalize_model_for_compare(model: Any) -> str:
+    if not isinstance(model, str):
+        return ""
+    normalized = _normalize_model_id(model)
+    if not isinstance(normalized, str):
+        return ""
+    return normalized.strip().lower()
+
+
+def _model_strict_match(requested_model: Any, returned_model: Any) -> bool:
+    req = _normalize_model_for_compare(requested_model)
+    ret = _normalize_model_for_compare(returned_model)
+    if not req or not ret:
+        return False
+    return req == ret
+
+
+def _extract_stream_model(first_chunk: Any) -> Optional[str]:
+    if isinstance(first_chunk, bytes):
+        text = first_chunk.decode("utf-8", errors="ignore")
+    elif isinstance(first_chunk, str):
+        text = first_chunk
+    else:
+        return None
+    for line in text.splitlines():
+        if not line.startswith("data:"):
+            continue
+        raw = line[5:].strip()
+        if not raw or raw == "[DONE]":
+            continue
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        model = payload.get("model")
+        if isinstance(model, str) and model.strip():
+            return model.strip()
+    return None
 
 
 def _is_thinking_model_id(model: str) -> bool:
@@ -601,6 +645,7 @@ class ProxyManager:
                     attempt_body = body
 
             try:
+                requested_model = attempt_body.get("model")
                 if not stream:
                     try:
                         result = await proxy.chat_completions(attempt_body, stream=False)
@@ -610,6 +655,13 @@ class ProxyManager:
                             result = await proxy.chat_completions(attempt_body, stream=False)
                         else:
                             raise
+                    if _ENFORCE_MODEL_STRICT_MATCH:
+                        returned_model = result.get("model") if isinstance(result, dict) else None
+                        if not _model_strict_match(requested_model, returned_model):
+                            raise HTTPException(
+                                status_code=502,
+                                detail=f"Strict model mismatch: requested={requested_model}, upstream={returned_model}",
+                            )
                     self._record_success(account_id)
                     return result
 
@@ -630,6 +682,15 @@ class ProxyManager:
                         first = await stream_iter.__anext__()
                     else:
                         raise
+                if _ENFORCE_MODEL_STRICT_MATCH:
+                    returned_stream_model = _extract_stream_model(first)
+                    if returned_stream_model is not None and (
+                        not _model_strict_match(requested_model, returned_stream_model)
+                    ):
+                        raise HTTPException(
+                            status_code=502,
+                            detail=f"Strict model mismatch(stream): requested={requested_model}, upstream={returned_stream_model}",
+                        )
 
                 async def gen() -> AsyncIterator[bytes]:
                     yield first
