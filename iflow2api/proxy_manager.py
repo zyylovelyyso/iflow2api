@@ -86,6 +86,17 @@ def _extract_stream_model(first_chunk: Any) -> Optional[str]:
     return None
 
 
+def _stream_from_result(result: dict) -> AsyncIterator[bytes]:
+    """Convert a non-stream OpenAI response into an SSE stream."""
+    payload = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+
+    async def gen() -> AsyncIterator[bytes]:
+        yield f"data: {payload}\n\n".encode("utf-8")
+        yield b"data: [DONE]\n\n"
+
+    return gen()
+
+
 def _is_thinking_model_id(model: str) -> bool:
     """
     Best-effort detection of models that support "thinking"/reasoning output.
@@ -149,6 +160,10 @@ def _is_upstream_account_blocked_error(exc: Exception) -> bool:
     if "api key" in detail and "blocked" in detail:
         return True
     return False
+
+
+def _is_refreshable_auth_error(exc: Exception) -> bool:
+    return _is_upstream_token_expired(exc) or _is_upstream_account_blocked_error(exc)
 
 
 def _apply_default_thinking(body: dict) -> None:
@@ -677,7 +692,7 @@ class ProxyManager:
                     try:
                         result = await proxy.chat_completions(attempt_body, stream=False)
                     except Exception as ex:
-                        if _is_upstream_token_expired(ex) and await self._refresh_account_oauth(account_id):
+                        if _is_refreshable_auth_error(ex) and await self._refresh_account_oauth(account_id):
                             proxy = await self._get_or_create_account_proxy(account_id)
                             result = await proxy.chat_completions(attempt_body, stream=False)
                         else:
@@ -703,12 +718,23 @@ class ProxyManager:
                             yield b""
                     return empty()
                 except Exception as ex:
-                    if _is_upstream_token_expired(ex) and await self._refresh_account_oauth(account_id):
-                        proxy = await self._get_or_create_account_proxy(account_id)
-                        stream_iter = await proxy.chat_completions(attempt_body, stream=True)
-                        first = await stream_iter.__anext__()
-                    else:
+                    # Streaming failed before first byte; fallback to non-stream response.
+                    fallback_proxy = proxy
+                    if _is_refreshable_auth_error(ex) and await self._refresh_account_oauth(account_id):
+                        fallback_proxy = await self._get_or_create_account_proxy(account_id)
+                    try:
+                        result = await fallback_proxy.chat_completions(attempt_body, stream=False)
+                    except Exception:
                         raise
+                    if _ENFORCE_MODEL_STRICT_MATCH:
+                        returned_model = result.get("model") if isinstance(result, dict) else None
+                        if not _model_strict_match(attempt_body.get("model"), returned_model):
+                            raise HTTPException(
+                                status_code=502,
+                                detail=f"Strict model mismatch(stream-fallback): requested={attempt_body.get('model')}, upstream={returned_model}",
+                            )
+                    self._record_success(account_id)
+                    return _stream_from_result(result)
                 if _ENFORCE_MODEL_STRICT_MATCH:
                     returned_stream_model = _extract_stream_model(first)
                     if returned_stream_model is not None and (

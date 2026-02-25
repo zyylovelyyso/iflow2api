@@ -68,13 +68,23 @@ def _add_reasoning_aliases(payload: dict) -> dict:
         msg = choice.get("message")
         if isinstance(msg, dict):
             rc = msg.get("reasoning_content")
-            if rc is not None and "reasoning" not in msg:
-                msg["reasoning"] = rc
+            if rc is not None:
+                if "reasoning" not in msg:
+                    msg["reasoning"] = rc
+                # Some upstreams only return reasoning_content; fill content for OpenAI compatibility.
+                content = msg.get("content")
+                if content is None or content == "":
+                    msg["content"] = rc
         delta = choice.get("delta")
         if isinstance(delta, dict):
             rc = delta.get("reasoning_content")
-            if rc is not None and "reasoning" not in delta:
-                delta["reasoning"] = rc
+            if rc is not None:
+                if "reasoning" not in delta:
+                    delta["reasoning"] = rc
+                # Mirror to content for streaming clients that only read delta.content.
+                content = delta.get("content")
+                if content is None or content == "":
+                    delta["content"] = rc
     return payload
 
 
@@ -283,6 +293,28 @@ class IFlowProxy:
                                 out = "data:" + json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
                             except Exception:
                                 out = line
+                    else:
+                        # Upstream sometimes returns a raw JSON error payload instead of SSE.
+                        # Detect and surface it as an exception so callers can retry/fallback.
+                        trimmed = line.strip()
+                        if trimmed.startswith("{") and trimmed.endswith("}"):
+                            try:
+                                payload = json.loads(trimmed)
+                                _raise_iflow_payload_error(payload)
+                                # If payload has explicit error fields, treat as upstream error too.
+                                if isinstance(payload, dict) and (
+                                    payload.get("error") is not None or payload.get("detail") is not None
+                                ):
+                                    raise IFlowUpstreamError(
+                                        payload.get("status") or 500,
+                                        str(payload.get("detail") or payload.get("error") or "Upstream error"),
+                                        payload,
+                                    )
+                            except IFlowUpstreamError:
+                                raise
+                            except Exception:
+                                # If parsing fails, fall through and emit raw line.
+                                pass
                     yield (out + "\n").encode("utf-8")
 
     async def proxy_request(
