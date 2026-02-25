@@ -824,7 +824,7 @@ function renderClaudeIflow(state){
     <div class=\"path-line\">命令文件：${esc(info.command_path || '')}</div>
     <div class=\"path-line\">启动脚本：${esc(info.start_script_path || '')}</div>
     <div class=\"path-line\">使用：<span class=\"code\">claude</span></div>
-    <div class=\"path-line\">说明：当前默认把 `claude` 映射到本地 iflow 网关。</div>
+    <div class=\"path-line\">说明：当前默认把 <span class=\"code\">claude</span> 映射到本地 iflow 网关。</div>
   `;
 }
 
