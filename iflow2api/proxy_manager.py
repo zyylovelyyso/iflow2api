@@ -14,6 +14,7 @@ from fastapi import HTTPException, Request
 from datetime import datetime, timezone
 
 from .config import IFlowConfig, load_iflow_config
+from .model_catalog import resolve_model_alias
 from .oauth import IFlowOAuth
 from .proxy import IFlowProxy
 from .resilience import get_http_status_code, is_retryable_exception
@@ -124,6 +125,32 @@ def _is_model_not_supported_error(exc: Exception) -> bool:
     return ("model" in msg) and ("not support" in msg or "unsupported" in msg)
 
 
+def _is_upstream_account_blocked_error(exc: Exception) -> bool:
+    """
+    Detect iFlow account/API key temporary blocked responses.
+    """
+    msg = str(exc or "").lower()
+    if "access to the current ak has been blocked" in msg:
+        return True
+    if "api key" in msg and "blocked" in msg:
+        return True
+    resp = getattr(exc, "response", None)
+    if resp is None:
+        return False
+    try:
+        data = resp.json()
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        return False
+    detail = str(data.get("msg") or data.get("message") or data.get("detail") or "").lower()
+    if "access to the current ak has been blocked" in detail:
+        return True
+    if "api key" in detail and "blocked" in detail:
+        return True
+    return False
+
+
 def _apply_default_thinking(body: dict) -> None:
     """
     Default-enable thinking for reasoning-capable models.
@@ -163,7 +190,7 @@ def _normalize_model_id(model: Any) -> Any:
     # Some clients use a "-chat" suffix while the upstream uses the base id.
     if low == "deepseek-v3.2-chat":
         return "deepseek-v3.2"
-    return raw
+    return resolve_model_alias(raw)
 
 
 def _extract_bearer_token(request: Request) -> Optional[str]:
@@ -708,7 +735,8 @@ class ProxyManager:
                 self._record_failure(account_id, e)
                 last_exc = e
                 model_not_supported = _is_model_not_supported_error(e)
-                retryable = model_not_supported or is_retryable_exception(
+                account_blocked = _is_upstream_account_blocked_error(e)
+                retryable = model_not_supported or account_blocked or is_retryable_exception(
                     e, self._routing.resilience.retry_status_codes
                 )
                 if not self._routing.resilience.enabled and not model_not_supported:

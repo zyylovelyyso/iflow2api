@@ -30,6 +30,23 @@
 >
 > 思考默认开启：对 `glm-5` / `minimax-m2.5` / `kimi-k2.5`（含 `iflow/<model>` 写法），若请求未显式传 `enable_thinking` / `thinking` / `reasoning` 字段，iflow2api 会自动注入 `enable_thinking=true`。
 
+### 模型分层别名（新增）
+
+iflow2api 内置了大/中/小模型别名映射：
+
+- 大模型（big）-> `glm-5`
+- 中模型（middle）-> `kimi-k2.5`
+- 小模型（small）-> `minimax-m2.5`
+
+可直接在 `model` 字段使用这些别名：
+- `iflow-big` / `big`
+- `iflow-middle` / `middle`
+- `iflow-small` / `small`
+- 兼容前缀：`claude-opus*` / `claude-sonnet*` / `claude-haiku*`
+
+查询当前映射：
+- `GET /v1/model-presets`
+
 ## 前置条件
 
 ### 登录方式（二选一）
@@ -254,6 +271,34 @@ curl http://localhost:8000/v1/chat/completions \
 - Base URL: `http://127.0.0.1:8000/v1`
 - API Key: 填 `keys.json` 里配置的任意一个 token（例如 `sk-local-user-a`）
 - Model: 使用 iFlow 模型 ID（例如 `glm-5`）
+
+### Claude Code 接入（不影响原有 claude）
+
+推荐通过 `claude-code-proxy` 走 Anthropic 协议，再转发到 iflow2api。
+
+本仓库已提供启动脚本：
+
+```powershell
+.\scripts\start-claude-code-proxy-iflow.ps1 -InstallIfMissing
+```
+
+脚本会自动读取 `~/.iflow2api/config.json` 中的本地 key，并使用如下映射：
+
+- BIG_MODEL: `glm-5`
+- MIDDLE_MODEL: `kimi-k2.5`
+- SMALL_MODEL: `minimax-m2.5`
+
+启动后可在另一个终端用（仅该终端走代理，不影响你原有 `claude`）：
+
+```powershell
+$env:ANTHROPIC_BASE_URL = "http://127.0.0.1:8082"
+$env:ANTHROPIC_AUTH_TOKEN = "dummy"
+claude
+```
+
+说明：
+- 不设置上述两个环境变量时，`claude` 仍走你原先官方链路。
+- iflow2api 默认开启严格模型匹配，不允许静默模型替换。
 
 ## 架构
 

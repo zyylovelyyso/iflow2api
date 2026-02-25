@@ -15,6 +15,26 @@ class ModelSpec:
     output: int = 8192
 
 
+TIERED_MODEL_MAPPING: dict[str, str] = {
+    "big": "glm-5",
+    "middle": "kimi-k2.5",
+    "small": "minimax-m2.5",
+}
+
+
+_MODEL_ALIASES: dict[str, str] = {
+    "iflow-big": TIERED_MODEL_MAPPING["big"],
+    "iflow-middle": TIERED_MODEL_MAPPING["middle"],
+    "iflow-small": TIERED_MODEL_MAPPING["small"],
+    "big": TIERED_MODEL_MAPPING["big"],
+    "middle": TIERED_MODEL_MAPPING["middle"],
+    "small": TIERED_MODEL_MAPPING["small"],
+    "claude-opus": TIERED_MODEL_MAPPING["big"],
+    "claude-sonnet": TIERED_MODEL_MAPPING["middle"],
+    "claude-haiku": TIERED_MODEL_MAPPING["small"],
+}
+
+
 def get_known_models() -> list[ModelSpec]:
     """Top 3 latest flagship models."""
     return [
@@ -26,6 +46,35 @@ def get_known_models() -> list[ModelSpec]:
 
 def get_recommended_models() -> list[ModelSpec]:
     return get_known_models()
+
+
+def get_tiered_model_mapping() -> dict[str, str]:
+    return dict(TIERED_MODEL_MAPPING)
+
+
+def resolve_model_alias(model_id: str) -> str:
+    """
+    Resolve friendly aliases to real iFlow model IDs.
+
+    Examples:
+    - iflow-big / big / claude-opus*   -> glm-5
+    - iflow-middle / middle / claude-sonnet* -> kimi-k2.5
+    - iflow-small / small / claude-haiku*    -> minimax-m2.5
+    """
+    raw = (model_id or "").strip()
+    if not raw:
+        return raw
+    low = raw.lower()
+    if low in _MODEL_ALIASES:
+        return _MODEL_ALIASES[low]
+    for prefix, mapped in (
+        ("claude-opus", TIERED_MODEL_MAPPING["big"]),
+        ("claude-sonnet", TIERED_MODEL_MAPPING["middle"]),
+        ("claude-haiku", TIERED_MODEL_MAPPING["small"]),
+    ):
+        if low.startswith(prefix):
+            return mapped
+    return raw
 
 
 def to_openai_models_list(models: Iterable[ModelSpec], *, owned_by: str = "iflow", created: int) -> dict[str, Any]:

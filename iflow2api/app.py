@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .config import load_iflow_config, check_iflow_login, IFlowConfig
+from .model_catalog import get_tiered_model_mapping
 from .proxy_manager import ProxyManager
 from .routing import KeyRoutingConfig, load_routing_config
 from .routing_refresher import start_global_routing_refresher, stop_global_routing_refresher
@@ -134,6 +135,7 @@ async def root():
         "description": "iFlow CLI AI 服务 → OpenAI 兼容 API",
         "endpoints": {
             "models": "/v1/models",
+            "model_presets": "/v1/model-presets",
             "chat_completions": "/v1/chat/completions",
             "health": "/health",
             "ui": "/ui",
@@ -169,6 +171,16 @@ async def list_models():
         return await proxy.get_models()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/v1/model-presets")
+async def model_presets():
+    """Get tier presets used for big/middle/small aliases."""
+    return {
+        "object": "iflow2api.model-presets",
+        "mapping": get_tiered_model_mapping(),
+    }
+
 
 @app.get("/debug/accounts")
 async def debug_accounts(request: Request):
@@ -283,6 +295,12 @@ async def chat_completions_compat(request: Request):
 async def list_models_compat():
     """Models API - 兼容不带 /v1 前缀的请求"""
     return await list_models()
+
+
+@app.get("/model-presets")
+async def model_presets_compat():
+    """Model presets API - 兼容不带 /v1 前缀的请求"""
+    return await model_presets()
 
 
 def main():
