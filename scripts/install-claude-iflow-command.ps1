@@ -35,7 +35,7 @@ if not defined HAS_SETTING_SOURCES set "BASE_ARGS=--setting-sources local"
 if defined HAS_MODEL (
   claude %BASE_ARGS% %*
 ) else (
-  claude %BASE_ARGS% --model claude-sonnet-4-5 %*
+  claude %BASE_ARGS% --model claude-sonnet-4-6 %*
 )
 "@
 
