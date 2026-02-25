@@ -104,6 +104,9 @@ $openaiBase = "http://$IflowHost`:$IflowPort/v1"
 # SMALL_MODEL  -> minimax-m2.5
 $env:OPENAI_BASE_URL = $openaiBase
 $env:OPENAI_API_KEY = $localApiKey
+$env:ANTHROPIC_API_KEY = "dummy"
+$env:GEMINI_API_KEY = "dummy"
+$env:PREFERRED_PROVIDER = "openai"
 $env:BIG_MODEL = "glm-5"
 $env:MIDDLE_MODEL = "kimi-k2.5"
 $env:SMALL_MODEL = "minimax-m2.5"
