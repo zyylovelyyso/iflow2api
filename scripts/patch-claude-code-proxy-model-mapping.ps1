@@ -122,6 +122,80 @@ if ($patched -notmatch "IFLOW_TOOL_BRIDGE_PATCH") {
   $changed = $true
 }
 
+if ($patched -notmatch "IFLOW_TOOL_RESULT_PATCH") {
+  $toolResultPattern = [regex]::new('(?s)\n            # Special handling for tool_result in user messages.*?messages.append\(\{"role": msg.role, "content": processed_content\}\)\n')
+  $toolResultBlock = @'
+
+            # IFLOW_TOOL_RESULT_PATCH
+            # Special handling for tool_result in user messages
+            # OpenAI/LiteLLM format expects tool results as role=tool with tool_call_id
+            if msg.role == "user" and any(block.type == "tool_result" for block in content if hasattr(block, "type")):
+                text_content = ""
+                tool_messages = []
+
+                for block in content:
+                    if hasattr(block, "type") and block.type == "text":
+                        text_content += block.text + "\n"
+                    elif hasattr(block, "type") and block.type == "tool_result":
+                        tool_call_id = block.tool_use_id if hasattr(block, "tool_use_id") else ""
+                        result_content = block.content if hasattr(block, "content") else ""
+                        result_text = parse_tool_result_content(result_content)
+                        tool_messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": result_text})
+
+                if text_content.strip():
+                    messages.append({"role": "user", "content": text_content.strip()})
+
+                messages.extend(tool_messages)
+            else:
+                # Regular handling for other message types
+                processed_content = []
+                for block in content:
+                    if hasattr(block, "type"):
+                        if block.type == "text":
+                            processed_content.append({"type": "text", "text": block.text})
+                        elif block.type == "image":
+                            processed_content.append({"type": "image", "source": block.source})
+                        elif block.type == "tool_use":
+                            # Handle tool use blocks if needed
+                            processed_content.append(
+                                {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
+                            )
+                        elif block.type == "tool_result":
+                            # Handle different formats of tool result content
+                            processed_content_block = {
+                                "type": "tool_result",
+                                "tool_use_id": block.tool_use_id if hasattr(block, "tool_use_id") else "",
+                            }
+
+                            # Process the content field properly
+                            if hasattr(block, "content"):
+                                if isinstance(block.content, str):
+                                    # If it's a simple string, create a text block for it
+                                    processed_content_block["content"] = [{"type": "text", "text": block.content}]
+                                elif isinstance(block.content, list):
+                                    # If it's already a list of blocks, keep it
+                                    processed_content_block["content"] = block.content
+                                else:
+                                    # Default fallback
+                                    processed_content_block["content"] = [{"type": "text", "text": str(block.content)}]
+                            else:
+                                # Default empty content
+                                processed_content_block["content"] = [{"type": "text", "text": ""}]
+
+                            processed_content.append(processed_content_block)
+
+                messages.append({"role": msg.role, "content": processed_content})
+
+'@
+
+  if ($toolResultPattern.IsMatch($patched)) {
+    $patched = $toolResultPattern.Replace($patched, $toolResultBlock)
+    $changed = $true
+  } else {
+    throw "[patch-proxy] failed: could not find tool_result block to patch."
+  }
+}
+
 if ($changed -and $patched -ne $raw) {
   [System.IO.File]::WriteAllText($filePath, $patched, [System.Text.UTF8Encoding]::new($false))
   Write-Host "[patch-proxy] patched: $filePath"
