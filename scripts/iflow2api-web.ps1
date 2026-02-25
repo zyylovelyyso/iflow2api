@@ -81,8 +81,7 @@ if ($listener -and (Test-Health $healthUrl)) {
   } catch {}
 }
 
-# Prefer the venv console entrypoint (more reliable than pythonw for uvicorn).
-$iflow2apiExe = Join-Path $RepoRoot ".venv\\Scripts\\iflow2api.exe"
+# Always use repo venv python + uvicorn to avoid stale/global package entrypoints.
 $pythonExe = Join-Path $RepoRoot ".venv\\Scripts\\python.exe"
 $pythonwExe = Join-Path $RepoRoot ".venv\\Scripts\\pythonw.exe"
 
@@ -92,14 +91,7 @@ $stdout = Join-Path $logDir "iflow2api-web.out.log"
 $stderr = Join-Path $logDir "iflow2api-web.err.log"
 
 try {
-  if (Test-Path $iflow2apiExe) {
-    Start-Process `
-      -FilePath $iflow2apiExe `
-      -WorkingDirectory $RepoRoot `
-      -WindowStyle Hidden `
-      -RedirectStandardOutput $stdout `
-      -RedirectStandardError $stderr | Out-Null
-  } elseif (Test-Path $pythonExe) {
+  if (Test-Path $pythonExe) {
     # Explicit uvicorn launch so host/port are guaranteed.
     Start-Process `
       -FilePath $pythonExe `
