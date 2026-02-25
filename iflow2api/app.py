@@ -1,8 +1,11 @@
 """FastAPI 应用 - OpenAI 兼容 API 服务"""
 
+import json
 import sys
+import time
 from contextlib import asynccontextmanager
-from typing import Any, Optional
+from typing import Any, AsyncIterator, Optional
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +23,78 @@ from .web_ui import router as web_ui_router
 
 # 全局代理管理器
 _proxy_manager: Optional[ProxyManager] = None
+
+
+def _extract_error_text(exc: Exception) -> str:
+    """Best-effort extraction of readable upstream error text."""
+    if isinstance(exc, HTTPException):
+        detail = exc.detail
+        if isinstance(detail, str) and detail.strip():
+            return detail.strip()
+        if detail is not None:
+            text = str(detail).strip()
+            if text:
+                return text
+
+    response = getattr(exc, "response", None)
+    if response is not None:
+        try:
+            payload = response.json()
+        except Exception:
+            payload = None
+        if isinstance(payload, dict):
+            for key in ("detail", "msg", "message", "error"):
+                value = payload.get(key)
+                if value is None:
+                    continue
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+                if isinstance(value, dict):
+                    nested = value.get("message") or value.get("detail")
+                    if isinstance(nested, str) and nested.strip():
+                        return nested.strip()
+                text = str(value).strip()
+                if text:
+                    return text
+
+    text = str(exc).strip()
+    return text or "Upstream error"
+
+
+async def _stream_error_as_openai_chunks(error_text: str, model: str | None) -> AsyncIterator[bytes]:
+    """
+    Convert stream exceptions into OpenAI SSE chunks, so clients get visible text
+    instead of an empty/silent stream termination.
+    """
+    safe_model = model or "unknown"
+    chunk_id = f"chatcmpl-{uuid4().hex[:24]}"
+    created = int(time.time())
+    visible_text = f"[iflow2api] 上游请求失败：{error_text}"
+
+    first = {
+        "id": chunk_id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": safe_model,
+        "choices": [
+            {
+                "index": 0,
+                "delta": {"role": "assistant", "content": visible_text},
+                "finish_reason": None,
+            }
+        ],
+    }
+    last = {
+        "id": chunk_id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": safe_model,
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+    }
+
+    yield f"data: {json.dumps(first, ensure_ascii=False, separators=(',', ':'))}\n\n".encode("utf-8")
+    yield f"data: {json.dumps(last, ensure_ascii=False, separators=(',', ':'))}\n\n".encode("utf-8")
+    yield b"data: [DONE]\n\n"
 
 
 def get_proxy_manager() -> ProxyManager:
@@ -209,7 +284,6 @@ async def chat_completions(request: Request):
     try:
         # 解析请求体 - 使用 bytes 然后手动解码以处理编码问题
         body_bytes = await request.body()
-        import json
         body = json.loads(body_bytes.decode("utf-8"))
         stream = body.get("stream", False)
 
@@ -221,28 +295,33 @@ async def chat_completions(request: Request):
                 tracker = get_usage_tracker()
                 usage_recorded = False
                 requested_model = body.get("model")
-                async for chunk in await manager.chat_completions(request, body, stream=True):
-                    if not usage_recorded:
-                        try:
-                            text = chunk.decode("utf-8", errors="ignore")
-                            for line in text.splitlines():
-                                if not line.startswith("data:"):
-                                    continue
-                                raw = line[5:].strip()
-                                if not raw or raw == "[DONE]":
-                                    continue
-                                obj = json.loads(raw)
-                                if not isinstance(obj, dict):
-                                    continue
-                                model = obj.get("model") if isinstance(obj.get("model"), str) else requested_model
-                                usage = obj.get("usage")
-                                if isinstance(usage, dict):
-                                    tracker.record(model=model, usage=usage)
-                                    usage_recorded = True
-                                    break
-                        except Exception:
-                            pass
-                    yield chunk
+                try:
+                    async for chunk in await manager.chat_completions(request, body, stream=True):
+                        if not usage_recorded:
+                            try:
+                                text = chunk.decode("utf-8", errors="ignore")
+                                for line in text.splitlines():
+                                    if not line.startswith("data:"):
+                                        continue
+                                    raw = line[5:].strip()
+                                    if not raw or raw == "[DONE]":
+                                        continue
+                                    obj = json.loads(raw)
+                                    if not isinstance(obj, dict):
+                                        continue
+                                    model = obj.get("model") if isinstance(obj.get("model"), str) else requested_model
+                                    usage = obj.get("usage")
+                                    if isinstance(usage, dict):
+                                        tracker.record(model=model, usage=usage)
+                                        usage_recorded = True
+                                        break
+                            except Exception:
+                                pass
+                        yield chunk
+                except Exception as stream_exc:
+                    err_text = _extract_error_text(stream_exc)
+                    async for err_chunk in _stream_error_as_openai_chunks(err_text, requested_model):
+                        yield err_chunk
                 if not usage_recorded:
                     tracker.record(model=requested_model, usage=None)
 
