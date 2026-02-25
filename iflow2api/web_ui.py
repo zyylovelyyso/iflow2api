@@ -1058,8 +1058,16 @@ async function startOAuth(inprivate){
       label: $('label').value || null,
     };
     const result = await api('/ui/api/oauth/start', { method: 'POST', body: JSON.stringify(payload) });
-    log(result.opened ? '已打开登录页面，请完成授权。' : '无法自动打开浏览器，请手动访问授权链接。');
-    log(`授权链接：${result.auth_url}`);
+    const authUrl = result.auth_url || '';
+    log(result.opened ? '已打开登录页面，请完成授权。' : '无法自动打开浏览器，已生成授权链接。');
+    if (authUrl) {
+      log(`授权链接：<a href="${authUrl}" target="_blank" rel="noopener">点击打开授权页面</a>`);
+      try {
+        if (!result.opened) window.open(authUrl, '_blank', 'noopener');
+      } catch (err) {
+        // Ignore popup errors; link above is clickable.
+      }
+    }
     toast('OAuth 已启动');
   } catch (error) {
     log(`OAuth 启动失败：${error}`);
