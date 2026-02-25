@@ -122,11 +122,12 @@ if ($patched -notmatch "IFLOW_TOOL_BRIDGE_PATCH") {
   $changed = $true
 }
 
-if ($patched -notmatch "IFLOW_TOOL_RESULT_PATCH") {
+if ($patched -notmatch "IFLOW_TOOL_CALLS_PATCH") {
   $toolResultPattern = [regex]::new('(?s)\n            # Special handling for tool_result in user messages.*?messages.append\(\{"role": msg.role, "content": processed_content\}\)\n')
   $toolResultBlock = @'
 
             # IFLOW_TOOL_RESULT_PATCH
+            # IFLOW_TOOL_CALLS_PATCH
             # Special handling for tool_result in user messages
             # OpenAI/LiteLLM format expects tool results as role=tool with tool_call_id
             if msg.role == "user" and any(block.type == "tool_result" for block in content if hasattr(block, "type")):
@@ -147,44 +148,72 @@ if ($patched -notmatch "IFLOW_TOOL_RESULT_PATCH") {
 
                 messages.extend(tool_messages)
             else:
-                # Regular handling for other message types
-                processed_content = []
-                for block in content:
-                    if hasattr(block, "type"):
-                        if block.type == "text":
-                            processed_content.append({"type": "text", "text": block.text})
-                        elif block.type == "image":
-                            processed_content.append({"type": "image", "source": block.source})
-                        elif block.type == "tool_use":
-                            # Handle tool use blocks if needed
-                            processed_content.append(
-                                {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
+                # For OpenAI models, convert tool_use blocks into tool_calls
+                if anthropic_request.model.startswith("openai/"):
+                    text_content = ""
+                    tool_calls = []
+
+                    for block in content:
+                        if hasattr(block, "type") and block.type == "text":
+                            text_content += block.text + "\n"
+                        elif hasattr(block, "type") and block.type == "tool_use":
+                            tool_id = block.id if hasattr(block, "id") and block.id else f"call_{uuid.uuid4().hex[:24]}"
+                            tool_name = block.name if hasattr(block, "name") else ""
+                            tool_input = block.input if hasattr(block, "input") else {}
+                            tool_calls.append(
+                                {
+                                    "id": tool_id,
+                                    "type": "function",
+                                    "function": {"name": tool_name, "arguments": json.dumps(tool_input)},
+                                }
                             )
-                        elif block.type == "tool_result":
-                            # Handle different formats of tool result content
-                            processed_content_block = {
-                                "type": "tool_result",
-                                "tool_use_id": block.tool_use_id if hasattr(block, "tool_use_id") else "",
-                            }
+                        elif hasattr(block, "type") and block.type == "tool_result":
+                            # Rare in assistant role - keep as text
+                            text_content += parse_tool_result_content(block.content if hasattr(block, "content") else "") + "\n"
 
-                            # Process the content field properly
-                            if hasattr(block, "content"):
-                                if isinstance(block.content, str):
-                                    # If it's a simple string, create a text block for it
-                                    processed_content_block["content"] = [{"type": "text", "text": block.content}]
-                                elif isinstance(block.content, list):
-                                    # If it's already a list of blocks, keep it
-                                    processed_content_block["content"] = block.content
+                    msg_payload = {"role": msg.role, "content": text_content.strip()}
+                    if tool_calls:
+                        msg_payload["tool_calls"] = tool_calls
+                    messages.append(msg_payload)
+                else:
+                    # Regular handling for other message types
+                    processed_content = []
+                    for block in content:
+                        if hasattr(block, "type"):
+                            if block.type == "text":
+                                processed_content.append({"type": "text", "text": block.text})
+                            elif block.type == "image":
+                                processed_content.append({"type": "image", "source": block.source})
+                            elif block.type == "tool_use":
+                                # Handle tool use blocks if needed
+                                processed_content.append(
+                                    {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
+                                )
+                            elif block.type == "tool_result":
+                                # Handle different formats of tool result content
+                                processed_content_block = {
+                                    "type": "tool_result",
+                                    "tool_use_id": block.tool_use_id if hasattr(block, "tool_use_id") else "",
+                                }
+
+                                # Process the content field properly
+                                if hasattr(block, "content"):
+                                    if isinstance(block.content, str):
+                                        # If it's a simple string, create a text block for it
+                                        processed_content_block["content"] = [{"type": "text", "text": block.content}]
+                                    elif isinstance(block.content, list):
+                                        # If it's already a list of blocks, keep it
+                                        processed_content_block["content"] = block.content
+                                    else:
+                                        # Default fallback
+                                        processed_content_block["content"] = [{"type": "text", "text": str(block.content)}]
                                 else:
-                                    # Default fallback
-                                    processed_content_block["content"] = [{"type": "text", "text": str(block.content)}]
-                            else:
-                                # Default empty content
-                                processed_content_block["content"] = [{"type": "text", "text": ""}]
+                                    # Default empty content
+                                    processed_content_block["content"] = [{"type": "text", "text": ""}]
 
-                            processed_content.append(processed_content_block)
+                                processed_content.append(processed_content_block)
 
-                messages.append({"role": msg.role, "content": processed_content})
+                    messages.append({"role": msg.role, "content": processed_content})
 
 '@
 
