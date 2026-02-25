@@ -67,6 +67,18 @@ function Is-ProxyProcess($proc) {
   return $cmd.Contains("claude-code-proxy")
 }
 
+function Stop-ListenerProcess([int]$port) {
+  try {
+    $conn = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction Stop | Select-Object -First 1
+    if (-not $conn) { return $false }
+    Stop-Process -Id $conn.OwningProcess -Force -ErrorAction Stop
+    Start-Sleep -Milliseconds 300
+    return $true
+  } catch {
+    return $false
+  }
+}
+
 $cfg = Read-Iflow2ApiConfig
 if ($IflowPort -le 0) {
   if ($null -ne $cfg.port -and "$($cfg.port)".Trim() -ne "") {
@@ -119,8 +131,8 @@ Write-Host ""
 if ($Background) {
   $listener = Get-ListenerProcess -port $GatewayPort
   if ($listener -and (Is-ProxyProcess $listener)) {
-    Write-Host "claude-code-proxy already running on ${GatewayHost}:$GatewayPort."
-    return
+    Write-Host "Found existing claude-code-proxy on ${GatewayHost}:$GatewayPort, restarting to apply latest env..."
+    [void](Stop-ListenerProcess -port $GatewayPort)
   }
   Start-Process -FilePath $proxyExe -WorkingDirectory (Get-Location).Path -WindowStyle Hidden | Out-Null
   Write-Host "claude-code-proxy started in background."

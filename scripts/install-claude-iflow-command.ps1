@@ -22,25 +22,19 @@ setlocal
 set "REPO_ROOT=$repoRoot"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_ROOT%\scripts\start-claude-code-proxy-iflow.ps1" -GatewayPort $GatewayPort -Background >nul
 set "ANTHROPIC_BASE_URL=http://127.0.0.1:$GatewayPort"
+set "ANTHROPIC_API_KEY=dummy"
 set "ANTHROPIC_AUTH_TOKEN=dummy"
 claude %*
 "@
 
-$ps1Content = @"
-param([Parameter(ValueFromRemainingArguments=`$true)][string[]]`$ArgsFromCaller)
-`$repoRoot = '$repoRoot'
-powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path `$repoRoot 'scripts\start-claude-code-proxy-iflow.ps1') -GatewayPort $GatewayPort -Background | Out-Null
-`$env:ANTHROPIC_BASE_URL = 'http://127.0.0.1:$GatewayPort'
-`$env:ANTHROPIC_AUTH_TOKEN = 'dummy'
-& claude @ArgsFromCaller
-"@
-
 [System.IO.File]::WriteAllText($cmdPath, $cmdContent, [System.Text.UTF8Encoding]::new($false))
-[System.IO.File]::WriteAllText($ps1Path, $ps1Content, [System.Text.UTF8Encoding]::new($false))
+if (Test-Path $ps1Path) {
+  Remove-Item -Force $ps1Path
+}
 
 Write-Host "Installed:"
 Write-Host "  $cmdPath"
-Write-Host "  $ps1Path"
+Write-Host "  (PowerShell wrapper removed to avoid argument conflicts)"
 Write-Host ""
 Write-Host "Usage:"
 Write-Host "  claude-iflow"

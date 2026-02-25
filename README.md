@@ -299,12 +299,15 @@ claude-iflow
 
 ```powershell
 $env:ANTHROPIC_BASE_URL = "http://127.0.0.1:8082"
+$env:ANTHROPIC_API_KEY = "dummy"
 $env:ANTHROPIC_AUTH_TOKEN = "dummy"
 claude
 ```
 
 说明：
 - 不设置上述两个环境变量时，`claude` 仍走你原先官方链路。
+- `claude-iflow` 只安装一个命令入口（`claude-iflow.cmd`），避免 PowerShell 参数冲突。
+- 每次调用 `claude-iflow` 会自动重启本地 `claude-code-proxy`，确保不会被旧环境变量污染。
 - iflow2api 默认开启严格模型匹配，不允许静默模型替换。
 
 ## 架构

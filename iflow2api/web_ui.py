@@ -191,10 +191,6 @@ def _claude_iflow_cmd_path() -> Path:
     return Path.home() / ".local" / "bin" / "claude-iflow.cmd"
 
 
-def _claude_iflow_ps1_path() -> Path:
-    return Path.home() / ".local" / "bin" / "claude-iflow.ps1"
-
-
 UI_HTML = """<!doctype html>
 <html lang=\"zh-CN\">
 <head>
@@ -1349,7 +1345,6 @@ async def ui_state(request: Request):
 
     claude_gateway_url = "http://127.0.0.1:8082"
     claude_cmd_path = _claude_iflow_cmd_path()
-    claude_ps1_path = _claude_iflow_ps1_path()
     claude_start_script = _claude_iflow_start_script()
     command_in_path = bool(shutil.which("claude-iflow") or shutil.which("claude-iflow.cmd"))
     command_installed = bool(claude_cmd_path.exists() or command_in_path)
@@ -1382,7 +1377,6 @@ async def ui_state(request: Request):
             "command_installed": command_installed,
             "command_in_path": command_in_path,
             "command_path": str(claude_cmd_path),
-            "command_ps1_path": str(claude_ps1_path),
             "start_script_path": str(claude_start_script),
             "install_script_path": str(_claude_iflow_install_script()),
             "mapping": get_tiered_model_mapping(),
@@ -1441,7 +1435,6 @@ async def ui_claude_iflow_install(request: Request):
     return {
         "ok": True,
         "command_path": str(_claude_iflow_cmd_path()),
-        "command_ps1_path": str(_claude_iflow_ps1_path()),
         "stdout": (proc.stdout or "").strip()[-400:],
     }
 
