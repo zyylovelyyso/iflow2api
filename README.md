@@ -272,9 +272,9 @@ curl http://localhost:8000/v1/chat/completions \
 - API Key: 填 `keys.json` 里配置的任意一个 token（例如 `sk-local-user-a`）
 - Model: 使用 iFlow 模型 ID（例如 `glm-5`）
 
-### Claude Code 接入（不影响原有 claude）
+### Claude Code 接入（直接使用 `claude`）
 
-推荐通过 `claude-code-proxy` 走 Anthropic 协议，再转发到 iflow2api。
+通过 `claude-code-proxy` 走 Anthropic 协议，再转发到 iflow2api。
 
 本仓库已提供启动脚本：
 
@@ -282,11 +282,11 @@ curl http://localhost:8000/v1/chat/completions \
 .\scripts\start-claude-code-proxy-iflow.ps1 -InstallIfMissing
 ```
 
-也可以安装全局命令（推荐）：
+安装 `claude` 映射入口（推荐）：
 
 ```powershell
-.\scripts\install-claude-iflow-command.ps1
-claude-iflow
+.\scripts\install-claude-command.ps1
+claude
 ```
 
 脚本会自动读取 `~/.iflow2api/config.json` 中的本地 key，并使用如下映射：
@@ -295,7 +295,7 @@ claude-iflow
 - MIDDLE_MODEL: `kimi-k2.5`
 - SMALL_MODEL: `minimax-m2.5`
 
-启动后可在另一个终端用（仅该终端走代理，不影响你原有 `claude`）：
+启动后可在另一个终端直接用：
 
 ```powershell
 $env:ANTHROPIC_BASE_URL = "http://127.0.0.1:8082"
@@ -304,10 +304,10 @@ claude
 ```
 
 说明：
-- 不设置上述两个环境变量时，`claude` 仍走你原先官方链路。
-- `claude-iflow` 只安装一个命令入口（`claude-iflow.cmd`），避免 PowerShell 参数冲突。
-- 每次调用 `claude-iflow` 会自动重启本地 `claude-code-proxy`，确保不会被旧环境变量污染。
-- `claude-iflow` 默认附带 `--setting-sources local` 与 `--model claude-sonnet-4-6`，避免读取 `~/.claude/settings.json` 的旧网关配置导致 401。
+- `claude` 包装入口默认附带 `--setting-sources local`，避免读取旧网关配置导致 401。
+- `claude` 包装入口默认模型为 `claude-sonnet-4-6`（可通过 `/model` 切换）。
+- `/model` 族映射为：Opus -> `glm-5`，Sonnet -> `kimi-k2.5`，Haiku -> `minimax-m2.5`。
+- 每次调用会自动重启本地 `claude-code-proxy`，确保不会被旧环境变量污染。
 - iflow2api 默认开启严格模型匹配，不允许静默模型替换。
 
 ## 架构

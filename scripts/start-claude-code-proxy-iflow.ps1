@@ -118,6 +118,15 @@ if (-not $proxyExe) {
   throw "claude-code-proxy not found. Run with -InstallIfMissing or install manually."
 }
 
+$patchScript = Join-Path $PSScriptRoot "patch-claude-code-proxy-model-mapping.ps1"
+if (Test-Path $patchScript) {
+  try {
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $patchScript | Out-Null
+  } catch {
+    Write-Host "Warning: failed to patch claude-code-proxy mapping: $($_.Exception.Message)"
+  }
+}
+
 Write-Host "===================================================="
 Write-Host " Claude Code Proxy -> iflow2api"
 Write-Host "===================================================="

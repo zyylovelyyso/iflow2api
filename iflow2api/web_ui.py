@@ -184,11 +184,11 @@ def _claude_iflow_start_script() -> Path:
 
 
 def _claude_iflow_install_script() -> Path:
-    return _repo_root() / "scripts" / "install-claude-iflow-command.ps1"
+    return _repo_root() / "scripts" / "install-claude-command.ps1"
 
 
 def _claude_iflow_cmd_path() -> Path:
-    return Path.home() / ".local" / "bin" / "claude-iflow.cmd"
+    return Path.home() / ".local" / "bin" / "claude.cmd"
 
 
 UI_HTML = """<!doctype html>
@@ -599,11 +599,11 @@ tr:hover td { background: rgba(54,217,255,.05); }
       </div>
 
       <div class=\"card\">
-        <h2>Claude-iflow 接入</h2>
-        <p class=\"hint\">不影响原 `claude`。你只在需要时使用 `claude-iflow` 走 iflow 模型映射。</p>
+        <h2>Claude 映射接入</h2>
+        <p class=\"hint\">直接使用 `claude` 即可：Opus/Sonnet/Haiku 自动映射到 iflow 三模型。</p>
         <div class=\"kv\" id=\"claudeKV\"></div>
         <div class=\"row\" style=\"margin-top:8px\">
-          <button id=\"btnInstallClaudeIflow\">安装/更新 claude-iflow</button>
+          <button id=\"btnInstallClaudeIflow\">安装/更新 claude 映射</button>
           <button class=\"alt\" id=\"btnStartClaudeProxy\">启动 Claude 网关</button>
           <button class=\"alt\" id=\"btnCopyClaudeIflow\">复制命令</button>
         </div>
@@ -815,7 +815,7 @@ function renderClaudeIflow(state){
   const mapping = info.mapping || {};
   $('claudeKV').innerHTML = `
     <div class=\"k\">网关地址</div><div><span class=\"code\">${esc(info.gateway_url || 'http://127.0.0.1:8082')}</span></div>
-    <div class=\"k\">全局命令</div><div><span class=\"code\">claude-iflow</span> ${info.command_installed ? '<span class=\"tag ok\">已安装</span>' : '<span class=\"tag warn\">未安装</span>'}</div>
+    <div class=\"k\">全局命令</div><div><span class=\"code\">claude</span> ${info.command_installed ? '<span class=\"tag ok\">已安装</span>' : '<span class=\"tag warn\">未安装</span>'}</div>
     <div class=\"k\">映射(Big/Mid/Small)</div><div><span class=\"code\">${esc(mapping.big || 'glm-5')} / ${esc(mapping.middle || 'kimi-k2.5')} / ${esc(mapping.small || 'minimax-m2.5')}</span></div>
     <div class=\"k\">AK 被拦截说明</div><div>这属于 iFlow 上游风控，不等于你未登录。账号池会自动切换可用账号。</div>
   `;
@@ -823,8 +823,8 @@ function renderClaudeIflow(state){
   $('claudeHelp').innerHTML = `
     <div class=\"path-line\">命令文件：${esc(info.command_path || '')}</div>
     <div class=\"path-line\">启动脚本：${esc(info.start_script_path || '')}</div>
-    <div class=\"path-line\">使用：<span class=\"code\">claude-iflow</span></div>
-    <div class=\"path-line\">如需回官方：直接用 <span class=\"code\">claude</span>（不带 iflow）。</div>
+    <div class=\"path-line\">使用：<span class=\"code\">claude</span></div>
+    <div class=\"path-line\">说明：当前默认把 `claude` 映射到本地 iflow 网关。</div>
   `;
 }
 
@@ -1142,11 +1142,11 @@ async function installClaudeIflow(){
   if (btn) btn.disabled = true;
   try {
     const result = await api('/ui/api/claude-iflow/install', { method: 'POST', body: '{}' });
-    log(`claude-iflow 安装完成：${result.command_path || ''}`);
-    toast('claude-iflow 已安装/更新');
+    log(`claude 映射安装完成：${result.command_path || ''}`);
+    toast('claude 映射已安装/更新');
     await refreshState();
   } catch (error) {
-    log(`claude-iflow 安装失败：${error}`);
+    log(`claude 映射安装失败：${error}`);
     toast('安装失败');
   } finally {
     if (btn) btn.disabled = false;
@@ -1166,8 +1166,8 @@ async function startClaudeProxy(){
 
 async function copyClaudeIflowCmd(){
   try {
-    await navigator.clipboard.writeText('claude-iflow');
-    toast('已复制 claude-iflow');
+    await navigator.clipboard.writeText('claude');
+    toast('已复制 claude');
   } catch (error) {
     toast('复制失败');
   }
@@ -1346,8 +1346,9 @@ async def ui_state(request: Request):
     claude_gateway_url = "http://127.0.0.1:8082"
     claude_cmd_path = _claude_iflow_cmd_path()
     claude_start_script = _claude_iflow_start_script()
-    command_in_path = bool(shutil.which("claude-iflow") or shutil.which("claude-iflow.cmd"))
-    command_installed = bool(claude_cmd_path.exists() or command_in_path)
+    resolved_claude = shutil.which("claude") or shutil.which("claude.cmd")
+    command_in_path = bool(resolved_claude and Path(resolved_claude).resolve() == claude_cmd_path.resolve())
+    command_installed = bool(claude_cmd_path.exists() and command_in_path)
 
     return {
         "iflow_logged_in": iflow_logged_in,
