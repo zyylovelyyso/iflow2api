@@ -51,6 +51,22 @@ function Ensure-ProxyExe {
   return Resolve-ProxyExe
 }
 
+function Get-ListenerProcess([int]$port) {
+  try {
+    $conn = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction Stop | Select-Object -First 1
+    if (-not $conn) { return $null }
+    return Get-CimInstance Win32_Process -Filter "ProcessId=$($conn.OwningProcess)"
+  } catch {
+    return $null
+  }
+}
+
+function Is-ProxyProcess($proc) {
+  if (-not $proc) { return $false }
+  $cmd = "$($proc.CommandLine)".ToLowerInvariant()
+  return $cmd.Contains("claude-code-proxy")
+}
+
 $cfg = Read-Iflow2ApiConfig
 if ($IflowPort -le 0) {
   if ($null -ne $cfg.port -and "$($cfg.port)".Trim() -ne "") {
@@ -101,6 +117,11 @@ Write-Host "  ANTHROPIC_BASE_URL=http://$GatewayHost`:$GatewayPort ANTHROPIC_AUT
 Write-Host ""
 
 if ($Background) {
+  $listener = Get-ListenerProcess -port $GatewayPort
+  if ($listener -and (Is-ProxyProcess $listener)) {
+    Write-Host "claude-code-proxy already running on ${GatewayHost}:$GatewayPort."
+    return
+  }
   Start-Process -FilePath $proxyExe -WorkingDirectory (Get-Location).Path -WindowStyle Hidden | Out-Null
   Write-Host "claude-code-proxy started in background."
   return

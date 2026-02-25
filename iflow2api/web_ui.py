@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+import shutil
+import subprocess
 import threading
 import time
 from dataclasses import dataclass
@@ -24,7 +26,7 @@ from .keys_store import (
     load_keys_config,
     save_keys_config,
 )
-from .model_catalog import get_recommended_models
+from .model_catalog import get_recommended_models, get_tiered_model_mapping
 from .oauth import IFlowOAuth
 from .opencode import discover_config_paths, ensure_iflow_provider
 from .routing import KeyRoutingConfig, get_routing_file_path_in_use
@@ -171,6 +173,26 @@ def _cleanup_pending(now: Optional[float] = None) -> None:
             pending = _PENDING.get(state)
             if not pending or now - float(pending.created_at) > ttl:
                 _PENDING.pop(state, None)
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def _claude_iflow_start_script() -> Path:
+    return _repo_root() / "scripts" / "start-claude-code-proxy-iflow.ps1"
+
+
+def _claude_iflow_install_script() -> Path:
+    return _repo_root() / "scripts" / "install-claude-iflow-command.ps1"
+
+
+def _claude_iflow_cmd_path() -> Path:
+    return Path.home() / ".local" / "bin" / "claude-iflow.cmd"
+
+
+def _claude_iflow_ps1_path() -> Path:
+    return Path.home() / ".local" / "bin" / "claude-iflow.ps1"
 
 
 UI_HTML = """<!doctype html>
@@ -581,6 +603,18 @@ tr:hover td { background: rgba(54,217,255,.05); }
       </div>
 
       <div class=\"card\">
+        <h2>Claude-iflow 接入</h2>
+        <p class=\"hint\">不影响原 `claude`。你只在需要时使用 `claude-iflow` 走 iflow 模型映射。</p>
+        <div class=\"kv\" id=\"claudeKV\"></div>
+        <div class=\"row\" style=\"margin-top:8px\">
+          <button id=\"btnInstallClaudeIflow\">安装/更新 claude-iflow</button>
+          <button class=\"alt\" id=\"btnStartClaudeProxy\">启动 Claude 网关</button>
+          <button class=\"alt\" id=\"btnCopyClaudeIflow\">复制命令</button>
+        </div>
+        <div id=\"claudeHelp\" class=\"paths\" style=\"margin-top:8px\"></div>
+      </div>
+
+      <div class=\"card\">
         <h2>Token 消耗统计</h2>
         <p class=\"hint\">仅统计本地网关收到并成功返回的请求。没有“剩余额度”，仅展示累计消耗。</p>
         <div class=\"kv\" id=\"usageKV\"></div>
@@ -780,6 +814,24 @@ function renderClient(state){
   }
 }
 
+function renderClaudeIflow(state){
+  const info = state.claude_iflow || {};
+  const mapping = info.mapping || {};
+  $('claudeKV').innerHTML = `
+    <div class=\"k\">网关地址</div><div><span class=\"code\">${esc(info.gateway_url || 'http://127.0.0.1:8082')}</span></div>
+    <div class=\"k\">全局命令</div><div><span class=\"code\">claude-iflow</span> ${info.command_installed ? '<span class=\"tag ok\">已安装</span>' : '<span class=\"tag warn\">未安装</span>'}</div>
+    <div class=\"k\">映射(Big/Mid/Small)</div><div><span class=\"code\">${esc(mapping.big || 'glm-5')} / ${esc(mapping.middle || 'kimi-k2.5')} / ${esc(mapping.small || 'minimax-m2.5')}</span></div>
+    <div class=\"k\">AK 被拦截说明</div><div>这属于 iFlow 上游风控，不等于你未登录。账号池会自动切换可用账号。</div>
+  `;
+
+  $('claudeHelp').innerHTML = `
+    <div class=\"path-line\">命令文件：${esc(info.command_path || '')}</div>
+    <div class=\"path-line\">启动脚本：${esc(info.start_script_path || '')}</div>
+    <div class=\"path-line\">使用：<span class=\"code\">claude-iflow</span></div>
+    <div class=\"path-line\">如需回官方：直接用 <span class=\"code\">claude</span>（不带 iflow）。</div>
+  `;
+}
+
 function renderOpenCode(state){
   $('provider').value = state.opencode_provider_name || 'iflow';
   const models = state.recommended_models || [];
@@ -960,6 +1012,7 @@ async function refreshState(){
     setStatus(Boolean(state.iflow_logged_in), state.iflow_logged_in ? '账号可用' : '未配置可用账号');
     renderRenew(state);
     renderClient(state);
+    renderClaudeIflow(state);
     renderUsage(state);
     renderOpenCode(state);
     renderAccounts(state);
@@ -1088,6 +1141,42 @@ async function resetUsage(){
   }
 }
 
+async function installClaudeIflow(){
+  const btn = $('btnInstallClaudeIflow');
+  if (btn) btn.disabled = true;
+  try {
+    const result = await api('/ui/api/claude-iflow/install', { method: 'POST', body: '{}' });
+    log(`claude-iflow 安装完成：${result.command_path || ''}`);
+    toast('claude-iflow 已安装/更新');
+    await refreshState();
+  } catch (error) {
+    log(`claude-iflow 安装失败：${error}`);
+    toast('安装失败');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function startClaudeProxy(){
+  try {
+    const result = await api('/ui/api/claude-iflow/start-proxy', { method: 'POST', body: '{}' });
+    log(`Claude 网关状态：${result.message || 'ok'}`);
+    toast('Claude 网关已处理');
+  } catch (error) {
+    log(`启动 Claude 网关失败：${error}`);
+    toast('启动失败');
+  }
+}
+
+async function copyClaudeIflowCmd(){
+  try {
+    await navigator.clipboard.writeText('claude-iflow');
+    toast('已复制 claude-iflow');
+  } catch (error) {
+    toast('复制失败');
+  }
+}
+
 async function probeModels(){
   const btn = $('btnProbeModels');
   if (btn) btn.disabled = true;
@@ -1120,6 +1209,9 @@ $('btnSync').onclick = syncOpenCode;
 $('btnRefresh').onclick = refreshState;
 $('btnRefreshNow').onclick = refreshNow;
 $('btnResetUsage').onclick = resetUsage;
+$('btnInstallClaudeIflow').onclick = installClaudeIflow;
+$('btnStartClaudeProxy').onclick = startClaudeProxy;
+$('btnCopyClaudeIflow').onclick = copyClaudeIflowCmd;
 $('btnProbeModels').onclick = probeModels;
 $('btnAutoRefresh').onclick = toggleAutoRefresh;
 $('autoRefreshSeconds').onchange = () => {
@@ -1255,6 +1347,13 @@ async def ui_state(request: Request):
             )
     usage_models.sort(key=lambda item: (item["total_tokens"], item["requests"]), reverse=True)
 
+    claude_gateway_url = "http://127.0.0.1:8082"
+    claude_cmd_path = _claude_iflow_cmd_path()
+    claude_ps1_path = _claude_iflow_ps1_path()
+    claude_start_script = _claude_iflow_start_script()
+    command_in_path = bool(shutil.which("claude-iflow") or shutil.which("claude-iflow.cmd"))
+    command_installed = bool(claude_cmd_path.exists() or command_in_path)
+
     return {
         "iflow_logged_in": iflow_logged_in,
         "base_url": base_url,
@@ -1278,6 +1377,16 @@ async def ui_state(request: Request):
             "today": usage_today if isinstance(usage_today, dict) else {},
             "by_model": usage_models[:12],
         },
+        "claude_iflow": {
+            "gateway_url": claude_gateway_url,
+            "command_installed": command_installed,
+            "command_in_path": command_in_path,
+            "command_path": str(claude_cmd_path),
+            "command_ps1_path": str(claude_ps1_path),
+            "start_script_path": str(claude_start_script),
+            "install_script_path": str(_claude_iflow_install_script()),
+            "mapping": get_tiered_model_mapping(),
+        },
     }
 
 
@@ -1296,6 +1405,85 @@ async def ui_usage_reset(request: Request):
     return {
         "ok": True,
         "updated_at": stats.get("updated_at"),
+    }
+
+
+@router.post("/ui/api/claude-iflow/install")
+async def ui_claude_iflow_install(request: Request):
+    _require_ui_allowed(request)
+    install_script = _claude_iflow_install_script()
+    if not install_script.exists():
+        raise HTTPException(status_code=404, detail=f"脚本不存在: {install_script}")
+
+    try:
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(install_script),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except Exception as ex:
+        raise HTTPException(status_code=500, detail=f"执行失败: {type(ex).__name__}: {ex}")
+
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "").strip()
+        raise HTTPException(status_code=500, detail=err[-400:] if err else "安装失败")
+
+    return {
+        "ok": True,
+        "command_path": str(_claude_iflow_cmd_path()),
+        "command_ps1_path": str(_claude_iflow_ps1_path()),
+        "stdout": (proc.stdout or "").strip()[-400:],
+    }
+
+
+@router.post("/ui/api/claude-iflow/start-proxy")
+async def ui_claude_iflow_start_proxy(request: Request):
+    _require_ui_allowed(request)
+    start_script = _claude_iflow_start_script()
+    if not start_script.exists():
+        raise HTTPException(status_code=404, detail=f"脚本不存在: {start_script}")
+
+    try:
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(start_script),
+                "-GatewayPort",
+                "8082",
+                "-Background",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=90,
+            check=False,
+        )
+    except Exception as ex:
+        raise HTTPException(status_code=500, detail=f"执行失败: {type(ex).__name__}: {ex}")
+
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "").strip()
+        raise HTTPException(status_code=500, detail=err[-400:] if err else "启动失败")
+
+    output = (proc.stdout or "").strip()
+    msg = output.splitlines()[-1] if output else "claude-code-proxy started"
+    return {
+        "ok": True,
+        "message": msg,
     }
 
 

@@ -282,6 +282,13 @@ curl http://localhost:8000/v1/chat/completions \
 .\scripts\start-claude-code-proxy-iflow.ps1 -InstallIfMissing
 ```
 
+也可以安装全局命令（推荐）：
+
+```powershell
+.\scripts\install-claude-iflow-command.ps1
+claude-iflow
+```
+
 脚本会自动读取 `~/.iflow2api/config.json` 中的本地 key，并使用如下映射：
 
 - BIG_MODEL: `glm-5`
