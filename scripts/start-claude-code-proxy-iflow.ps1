@@ -128,7 +128,7 @@ Write-Host "MIDDLE     : $($env:MIDDLE_MODEL)"
 Write-Host "SMALL      : $($env:SMALL_MODEL)"
 Write-Host ""
 Write-Host "Use in another terminal (does not affect default claude):"
-Write-Host "  ANTHROPIC_BASE_URL=http://$GatewayHost`:$GatewayPort ANTHROPIC_AUTH_TOKEN=dummy claude"
+Write-Host "  ANTHROPIC_BASE_URL=http://$GatewayHost`:$GatewayPort ANTHROPIC_API_KEY=dummy claude"
 Write-Host ""
 
 if ($Background) {

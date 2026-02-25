@@ -23,7 +23,6 @@ set "REPO_ROOT=$repoRoot"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_ROOT%\scripts\start-claude-code-proxy-iflow.ps1" -GatewayPort $GatewayPort -Background >nul
 set "ANTHROPIC_BASE_URL=http://127.0.0.1:$GatewayPort"
 set "ANTHROPIC_API_KEY=dummy"
-set "ANTHROPIC_AUTH_TOKEN=dummy"
 set "HAS_MODEL="
 set "HAS_SETTING_SOURCES="
 for %%A in (%*) do (

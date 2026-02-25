@@ -300,7 +300,6 @@ claude-iflow
 ```powershell
 $env:ANTHROPIC_BASE_URL = "http://127.0.0.1:8082"
 $env:ANTHROPIC_API_KEY = "dummy"
-$env:ANTHROPIC_AUTH_TOKEN = "dummy"
 claude
 ```
 
